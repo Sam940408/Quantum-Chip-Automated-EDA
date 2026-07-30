@@ -1,103 +1,168 @@
 """
 02_train_model.py
-==========================
-模型訓練程式（讀取已清理好的資料包，不碰資料庫）
---------------------------------------------------
-職責：
-  1. 讀取 01_data_preprocessing.py 產生的 processed_data.npz / processed_meta.json
-  2. 驗證資料完整性（data_hash 對得上才繼續，避免資料被中途置換）
-  3. 監督式預訓練 Surrogate Model（幾何參數 → 量子效能）
-  4. 用 Surrogate 當作快速環境，訓練 SAC 強化學習 Agent
-  5. 輸出可推論的模型檔（surrogate.pt / sac_quantum.pt）與訓練歷史
+=================
+動態 Surrogate Model + SAC 訓練程式。
 
-前置需求：
-  先執行 01_data_preprocessing.py，確認同目錄下已有
-    processed_data.npz
-    processed_meta.json
+所有資料路徑、輸入／輸出名稱、單位、最佳化 target、reward 權重與
+訓練超參數均由 ai_config.json 讀取。
 
 使用方式：
-  python 02_train_model.py
+  python 02_train_model.py --config ai_config.json
+  python 02_train_model.py --config ai_config.json --surrogate-only
 """
 
+from __future__ import annotations
+
+import argparse
+import hashlib
 import json
 import time
-import os
-from pathlib import Path
-os.chdir(Path(__file__).parent)
 from collections import deque
-from typing import Dict, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.distributions import Normal
 
 
-# ══════════════════════════════════════════════════════════════
-# 0. 設定區 ── 所有可調權重與超參數都在這裡
-# ══════════════════════════════════════════════════════════════
+HERE = Path(__file__).resolve().parent
+DEFAULT_CONFIG_PATH = HERE / "ai_config.json"
 
-# ── 輸入檔案（由 01_data_preprocessing.py 產生）──
-DATA_NPZ_PATH  = "processed_data.npz"
-META_JSON_PATH = "processed_meta.json"
-
-# ── 0-A. 目標量子效能（GHz）── key 必須對應 meta 裡的 output_names
-TARGET_PERFORMANCE = {
-    "EC_coupler1":  100.0,
-    "EC_qubit1":    190.0,
-    "EC_qubit2":    190.0,
-    "g_g12_q1_q2":   5.0,
-    "g_g1c_q1_cp":  110.0,
-    "g_g2c_q2_cp":  110.0,
-}
-
-# ── 0-B. Reward 各效能指標權重（數值越大越重要，自動正規化）──
-REWARD_WEIGHTS = {
-    "EC_coupler1":  1.0,
-    "EC_qubit1":    1.0,
-    "EC_qubit2":    1.0,
-    "g_g12_q1_q2":  2.0,   # 耦合強度較難控制，加權
-    "g_g1c_q1_cp":  1.0,
-    "g_g2c_q2_cp":  1.0,
-}
-
-# ── 0-C. Surrogate 監督式預訓練超參數 ──
-PRETRAIN_CONFIG = {
-    "epochs":     50,
+DEFAULT_PRETRAIN_CONFIG = {
+    "epochs": 50,
     "batch_size": 256,
-    "lr":         1e-3,
+    "lr": 1e-3,
     "weight_decay": 1e-4,
     "early_stop": 8,
+    "hidden_dims": [256, 256, 256],
 }
-
-# ── 0-D. SAC 超參數 ──
-SAC_CONFIG = {
-    "lr_actor":        3e-4,
-    "lr_critic":       3e-4,
-    "lr_alpha":        3e-4,
-    "gamma":           0.99,
-    "tau":             0.005,
-    "buffer_size":     100_000,
-    "batch_size":      256,
-    "warmup_steps":    1000,
+DEFAULT_SAC_CONFIG = {
+    "lr_actor": 3e-4,
+    "lr_critic": 3e-4,
+    "lr_alpha": 3e-4,
+    "gamma": 0.99,
+    "tau": 0.005,
+    "buffer_size": 100_000,
+    "batch_size": 256,
+    "warmup_steps": 1000,
     "update_per_step": 1,
-    "init_alpha":      0.2,
-    "hidden_dims":     (256, 256, 256),
+    "init_alpha": 0.2,
+    "hidden_dims": [256, 256, 256],
+}
+DEFAULT_TRAIN_CONFIG = {
+    "total_steps": 10_000,
+    "bc_init_samples": 5000,
+    "log_every": 500,
 }
 
-# ── 0-E. 訓練規模 ──
-TRAIN_CONFIG = {
-    "total_steps":     10_000,
-    "bc_init_samples": 5000,     # 從資料集抽樣填入 Replay Buffer 的筆數
-    "log_every":       500,
-}
 
-SURROGATE_SAVE_PATH = "surrogate.pt"
-SAC_SAVE_PATH        = "sac_quantum.pt"
-TRAIN_HISTORY_PATH   = "train_history.json"
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"找不到設定檔：{path}")
+    with path.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, dict):
+        raise ValueError(f"設定檔最外層必須是 JSON 物件：{path}")
+    return data
 
+
+def _resolve_path(value: str, base_dir: Path) -> Path:
+    path = Path(value).expanduser()
+    return path.resolve() if path.is_absolute() else (base_dir / path).resolve()
+
+
+def _merged(defaults: Mapping[str, Any], overrides: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    result = dict(defaults)
+    if overrides:
+        result.update(dict(overrides))
+    return result
+
+
+def load_runtime_config(config_path: str | Path) -> Dict[str, Any]:
+    config_path = Path(config_path).expanduser().resolve()
+    config = _load_json(config_path)
+    base_dir = config_path.parent
+
+    artifacts = dict(config.get("artifacts", {}))
+    artifact_dir = _resolve_path(str(artifacts.get("directory", "ai_artifacts/default")), base_dir)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    pretrain = _merged(DEFAULT_PRETRAIN_CONFIG, config.get("training", {}).get("surrogate"))
+    sac = _merged(DEFAULT_SAC_CONFIG, config.get("training", {}).get("sac"))
+    run = _merged(DEFAULT_TRAIN_CONFIG, config.get("training", {}).get("run"))
+    pretrain["hidden_dims"] = tuple(int(v) for v in pretrain.get("hidden_dims", [256, 256, 256]))
+    sac["hidden_dims"] = tuple(int(v) for v in sac.get("hidden_dims", [256, 256, 256]))
+
+    objectives = dict(config.get("optimization", {}).get("objectives", {}))
+    target_performance = {
+        name: float(spec["target"])
+        for name, spec in objectives.items()
+        if isinstance(spec, dict) and spec.get("target") is not None
+    }
+    reward_weights = {
+        name: float(spec.get("weight", 0.0))
+        for name, spec in objectives.items()
+        if isinstance(spec, dict)
+    }
+
+    return {
+        "config": config,
+        "config_path": config_path,
+        "artifact_dir": artifact_dir,
+        "data_npz": artifact_dir / str(artifacts.get("processed_data", "processed_data.npz")),
+        "meta_json": artifact_dir / str(artifacts.get("metadata", "processed_meta.json")),
+        "surrogate_path": artifact_dir / str(artifacts.get("surrogate_model", "surrogate.pt")),
+        "sac_path": artifact_dir / str(artifacts.get("sac_model", "sac_quantum.pt")),
+        "history_path": artifact_dir / str(artifacts.get("train_history", "train_history.json")),
+        "candidate_path": artifact_dir / str(artifacts.get("candidate", "sac_candidate.json")),
+        "pretrain": pretrain,
+        "sac": sac,
+        "run": run,
+        "objectives": objectives,
+        "target_performance": target_performance,
+        "reward_weights": reward_weights,
+    }
+
+
+def _default_exports() -> Dict[str, Any]:
+    if DEFAULT_CONFIG_PATH.is_file():
+        return load_runtime_config(DEFAULT_CONFIG_PATH)
+    artifact_dir = HERE
+    return {
+        "config": {},
+        "config_path": DEFAULT_CONFIG_PATH,
+        "artifact_dir": artifact_dir,
+        "data_npz": artifact_dir / "processed_data.npz",
+        "meta_json": artifact_dir / "processed_meta.json",
+        "surrogate_path": artifact_dir / "surrogate.pt",
+        "sac_path": artifact_dir / "sac_quantum.pt",
+        "history_path": artifact_dir / "train_history.json",
+        "candidate_path": artifact_dir / "sac_candidate.json",
+        "pretrain": dict(DEFAULT_PRETRAIN_CONFIG, hidden_dims=(256, 256, 256)),
+        "sac": dict(DEFAULT_SAC_CONFIG, hidden_dims=(256, 256, 256)),
+        "run": dict(DEFAULT_TRAIN_CONFIG),
+        "objectives": {},
+        "target_performance": {},
+        "reward_weights": {},
+    }
+
+
+# 保留這些名稱，讓既有的 04 報告程式仍可 import。
+_DEFAULT = _default_exports()
+DATA_NPZ_PATH = str(_DEFAULT["data_npz"])
+META_JSON_PATH = str(_DEFAULT["meta_json"])
+SURROGATE_SAVE_PATH = str(_DEFAULT["surrogate_path"])
+SAC_SAVE_PATH = str(_DEFAULT["sac_path"])
+TRAIN_HISTORY_PATH = str(_DEFAULT["history_path"])
+TARGET_PERFORMANCE = dict(_DEFAULT["target_performance"])
+REWARD_WEIGHTS = dict(_DEFAULT["reward_weights"])
+PRETRAIN_CONFIG = dict(_DEFAULT["pretrain"])
+SAC_CONFIG = dict(_DEFAULT["sac"])
+TRAIN_CONFIG = dict(_DEFAULT["run"])
 
 # ══════════════════════════════════════════════════════════════
 # 1. 載入資料包並驗證完整性
@@ -155,14 +220,16 @@ class ProcessedData:
         self.output_std  = np.array(self.meta["output_std"],  dtype=np.float32)
         self.param_low   = np.array(self.meta["param_low"],   dtype=np.float32)
         self.param_high  = np.array(self.meta["param_high"],  dtype=np.float32)
+        self.param_units = dict(self.meta.get("param_units", {}))
+        self.output_units = dict(self.meta.get("output_units", {}))
+        self.feature_specs = list(self.meta.get("feature_specs", []))
+        self.target_specs = list(self.meta.get("target_specs", []))
 
         print(f"[Data] {self.meta['n_samples']} 筆樣本 | "
               f"action_dim={self.action_dim} | output_dim={self.output_dim} | "
               f"train={self.meta['n_train']} / val={self.meta['n_val']}")
         if self.meta.get("fixed_params"):
             print(f"[Data] 已排除固定參數：{list(self.meta['fixed_params'].keys())}")
-        if self.meta.get("pad_info"):
-            print(f"[Data] 補齊維度資訊：{self.meta['pad_info']}")
 
     def denorm_output(self, y_norm: np.ndarray) -> np.ndarray:
         return y_norm * self.output_std + self.output_mean
@@ -255,7 +322,7 @@ def pretrain_surrogate(model: SurrogateModel, data: ProcessedData, cfg: Dict) ->
     model.load_state_dict(best_state)
     print(f"  預訓練完成，最佳 val loss = {best_val:.5f}")
 
-    # ── 補充：以「物理單位（GHz）」報告每個輸出欄位在驗證集上的誤差 ──
+    # ── 依 processed_meta.json 的 output_units 顯示物理單位 ──
     #    正規化後的 MSE 難以直觀判斷好壞，
     #    這裡反正規化回真實數值，印出每個 EC/g 的平均絕對誤差與相對誤差
     model.eval()
@@ -268,7 +335,9 @@ def pretrain_surrogate(model: SurrogateModel, data: ProcessedData, cfg: Dict) ->
     rel = (np.abs(pred_real - true_real) / (np.abs(true_real) + 1e-8)).mean(axis=0) * 100
     print("  驗證集各輸出誤差（物理單位）：")
     for name, m, r_ in zip(data.output_names, mae, rel):
-        print(f"    {name:<16} MAE={m:8.4f} GHz | 平均相對誤差={r_:5.2f}%")
+        unit = data.output_units.get(name, "")
+        unit_text = f" {unit}" if unit else ""
+        print(f"    {name:<24} MAE={m:10.5f}{unit_text} | 平均相對誤差={r_:6.2f}%")
     print()
     return history
 
@@ -279,7 +348,11 @@ def pretrain_surrogate(model: SurrogateModel, data: ProcessedData, cfg: Dict) ->
 
 def build_reward_fn(output_names: List[str], x_tar: np.ndarray, weights: Dict[str, float]):
     """r = -Σ wᵢ · |x^sim_i - x^tar_i| / |x^tar_i|，wᵢ 依 output_names 順序取出並正規化"""
-    w = np.array([weights[n] for n in output_names], dtype=np.float32)
+    w = np.array([float(weights.get(n, 0.0)) for n in output_names], dtype=np.float32)
+    if np.any(w < 0):
+        raise ValueError("Reward weight 不可為負值。")
+    if float(w.sum()) <= 0:
+        raise ValueError("至少一個輸出欄位的 Reward weight 必須大於 0。")
     w = w / w.sum()
 
     def reward_fn(x_sim: np.ndarray, penalty: float = 0.0) -> float:
@@ -536,7 +609,7 @@ def train_sac(sac: SACTrainer, env: SurrogateEnv, data: ProcessedData,
     for step in range(1, cfg["total_steps"] + 1):
         state = env.get_state()
 
-        if len(sac.buffer) < SAC_CONFIG["warmup_steps"]:
+        if len(sac.buffer) < sac.cfg["warmup_steps"]:
             action = np.random.uniform(-1, 1, data.action_dim)
         else:
             action = sac.select_action(state)
@@ -551,8 +624,8 @@ def train_sac(sac: SACTrainer, env: SurrogateEnv, data: ProcessedData,
 
         sac.buffer.push(state, action, np.array([r]), next_state, np.array([0.0]))
 
-        if len(sac.buffer) >= SAC_CONFIG["warmup_steps"]:
-            for _ in range(SAC_CONFIG["update_per_step"]):
+        if len(sac.buffer) >= sac.cfg["warmup_steps"]:
+            for _ in range(sac.cfg["update_per_step"]):
                 sac.update()
 
         err = float(np.linalg.norm(x_sim - env.x_tar))
@@ -568,6 +641,9 @@ def train_sac(sac: SACTrainer, env: SurrogateEnv, data: ProcessedData,
                 sac.save(save_path)
                 print(f"    → 新最佳 avg_r={best_r:.4f}，模型已儲存")
 
+    if not Path(save_path).exists():
+        sac.save(save_path)
+        print(f"    → 訓練結束，已儲存 SAC 模型：{save_path}")
     return history
 
 
@@ -587,63 +663,183 @@ def infer(sac: SACTrainer, env: SurrogateEnv, data: ProcessedData) -> np.ndarray
 
 
 # ══════════════════════════════════════════════════════════════
-# 10. Entry Point
+# 10. 動態設定、候選輸出與 Entry Point
 # ══════════════════════════════════════════════════════════════
 
-def main():
-    torch.manual_seed(42)
-    np.random.seed(42)
 
-    print("=" * 60)
-    print("  模型訓練  (02_train_model.py)")
-    print("=" * 60)
+def build_optimization_vectors(
+    runtime: Mapping[str, Any],
+    data: ProcessedData,
+) -> Tuple[np.ndarray, Dict[str, float], Dict[str, str]]:
+    objectives = dict(runtime.get("objectives", {}))
+    targets: List[float] = []
+    weights: Dict[str, float] = {}
+    units: Dict[str, str] = {}
 
-    # 1. 載入已清理資料包
-    data = ProcessedData(DATA_NPZ_PATH, META_JSON_PATH)
+    for index, name in enumerate(data.output_names):
+        spec = objectives.get(name, {})
+        if not isinstance(spec, dict):
+            raise TypeError(f"optimization.objectives.{name} 必須是 JSON 物件。")
 
-    # 檢查 TARGET_PERFORMANCE / REWARD_WEIGHTS 的 key 是否對得上 meta 的輸出欄位
-    missing_tar = [n for n in data.output_names if n not in TARGET_PERFORMANCE]
-    missing_w   = [n for n in data.output_names if n not in REWARD_WEIGHTS]
-    if missing_tar or missing_w:
-        raise RuntimeError(
-            f"設定不完整：TARGET_PERFORMANCE 缺少 {missing_tar}，"
-            f"REWARD_WEIGHTS 缺少 {missing_w}。請對照 processed_meta.json 的 output_names 補齊。"
+        # 未設定 target 的輸出以訓練集平均值作為 state 參考，但 reward 權重預設為 0。
+        target = float(spec.get("target", data.output_mean[index]))
+        weight = float(spec.get("weight", 0.0))
+        config_unit = str(spec.get("unit", ""))
+        data_unit = str(data.output_units.get(name, ""))
+        if config_unit and data_unit and config_unit != data_unit:
+            raise ValueError(
+                f"輸出 {name} 單位不一致：資料為 {data_unit!r}，objective 為 {config_unit!r}"
+            )
+        targets.append(target)
+        weights[name] = weight
+        units[name] = data_unit or config_unit
+
+    if sum(weights.values()) <= 0:
+        raise ValueError("optimization.objectives 至少要有一個 weight > 0。")
+    return np.asarray(targets, dtype=np.float32), weights, units
+
+
+def predict_surrogate(
+    surrogate: SurrogateModel,
+    data: ProcessedData,
+    parameters: np.ndarray,
+) -> np.ndarray:
+    surrogate.eval()
+    with torch.no_grad():
+        normalized = torch.tensor(
+            data.norm_param(parameters), dtype=torch.float32
+        ).unsqueeze(0)
+        prediction_norm = surrogate(normalized).cpu().numpy()[0]
+    return data.denorm_output(prediction_norm)
+
+
+def save_candidate(
+    path: Path,
+    data: ProcessedData,
+    parameters: np.ndarray,
+    predicted: np.ndarray,
+    targets: np.ndarray,
+    weights: Mapping[str, float],
+    units: Mapping[str, str],
+    runtime: Mapping[str, Any],
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "config_path": str(runtime["config_path"]),
+        "data_hash": data.meta["data_hash"],
+        "parameters": {
+            name: float(value) for name, value in zip(data.param_names, parameters)
+        },
+        "parameter_units": {
+            name: data.param_units.get(name, "") for name in data.param_names
+        },
+        "predicted_outputs": {
+            name: float(value) for name, value in zip(data.output_names, predicted)
+        },
+        "targets": {
+            name: float(value) for name, value in zip(data.output_names, targets)
+        },
+        "reward_weights": {name: float(weights.get(name, 0.0)) for name in data.output_names},
+        "output_units": {name: units.get(name, "") for name in data.output_names},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, ensure_ascii=False)
+    print(f"[Save] SAC 候選參數已儲存至 {path}")
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="動態 Surrogate + SAC 訓練")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="AI JSON 設定檔。")
+    parser.add_argument(
+        "--surrogate-only",
+        action="store_true",
+        help="只訓練 Surrogate，不訓練 SAC。",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_arguments()
+    runtime = load_runtime_config(args.config)
+
+    seed = int(runtime["config"].get("training", {}).get("random_seed", 42))
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    print("=" * 72)
+    print("  動態模型訓練  (02_train_model.py)")
+    print("=" * 72)
+    print(f"設定檔：{runtime['config_path']}")
+
+    data = ProcessedData(str(runtime["data_npz"]), str(runtime["meta_json"]))
+    target_vector, reward_weights, output_units = build_optimization_vectors(runtime, data)
+
+    surrogate = SurrogateModel(
+        in_dim=data.action_dim,
+        out_dim=data.output_dim,
+        hidden=runtime["pretrain"]["hidden_dims"],
+    )
+    pretrain_history = pretrain_surrogate(surrogate, data, runtime["pretrain"])
+    torch.save(surrogate.state_dict(), runtime["surrogate_path"])
+    print(f"[Save] Surrogate 已儲存至 {runtime['surrogate_path']}")
+
+    if args.surrogate_only:
+        with Path(runtime["history_path"]).open("w", encoding="utf-8") as file:
+            json.dump({"pretrain": pretrain_history, "sac": None}, file, indent=2)
+        print("[完成] 已依 --surrogate-only 跳過 SAC。")
+        return
+
+    env = SurrogateEnv(surrogate, data, target_vector, reward_weights)
+    sac = SACTrainer(data.state_dim, data.action_dim, runtime["sac"])
+    bc_init_buffer(
+        sac,
+        env,
+        data,
+        int(runtime["run"]["bc_init_samples"]),
+        target_vector,
+    )
+
+    start_time = time.time()
+    sac_history = train_sac(
+        sac,
+        env,
+        data,
+        runtime["run"],
+        str(runtime["sac_path"]),
+    )
+    elapsed = time.time() - start_time
+    print(f"\n[完成] SAC 訓練耗時 {elapsed / 60:.1f} 分鐘")
+
+    with Path(runtime["history_path"]).open("w", encoding="utf-8") as file:
+        json.dump(
+            {
+                "pretrain": pretrain_history,
+                "sac": {key: values[::10] for key, values in sac_history.items()},
+                "elapsed_sec": elapsed,
+                "config_path": str(runtime["config_path"]),
+                "data_hash": data.meta["data_hash"],
+            },
+            file,
+            indent=2,
+            ensure_ascii=False,
         )
+    print(f"[Save] 訓練歷史已儲存至 {runtime['history_path']}")
 
-    # 2. 預訓練 Surrogate
-    surrogate = SurrogateModel(in_dim=data.action_dim, out_dim=data.output_dim)
-    pretrain_history = pretrain_surrogate(surrogate, data, PRETRAIN_CONFIG)
-    torch.save(surrogate.state_dict(), SURROGATE_SAVE_PATH)
-    print(f"[Save] Surrogate 已儲存至 {SURROGATE_SAVE_PATH}")
-
-    # 3. 建立環境
-    x_tar = np.array([TARGET_PERFORMANCE[n] for n in data.output_names], dtype=np.float32)
-    env = SurrogateEnv(surrogate, data, x_tar, REWARD_WEIGHTS)
-
-    # 4. 建立 SAC
-    sac = SACTrainer(data.state_dim, data.action_dim, SAC_CONFIG)
-
-    # 5. BC 初始化
-    bc_init_buffer(sac, env, data, TRAIN_CONFIG["bc_init_samples"], x_tar)
-
-    # 6. 訓練
-    t0 = time.time()
-    sac_history = train_sac(sac, env, data, TRAIN_CONFIG, SAC_SAVE_PATH)
-    elapsed = time.time() - t0
-    print(f"\n[完成] SAC 訓練耗時 {elapsed/60:.1f} 分鐘")
-
-    # 7. 儲存訓練歷史
-    with open(TRAIN_HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump({
-            "pretrain": pretrain_history,
-            "sac": {k: v[::10] for k, v in sac_history.items()},  # 每 10 步存一次，避免檔案過大
-            "elapsed_sec": elapsed,
-        }, f, indent=2)
-    print(f"[Save] 訓練歷史已儲存至 {TRAIN_HISTORY_PATH}")
-
-    # 8. 推論最佳結果
-    sac.load(SAC_SAVE_PATH)
-    infer(sac, env, data)
+    sac.load(str(runtime["sac_path"]))
+    best_parameters = infer(sac, env, data)
+    predicted_outputs = predict_surrogate(surrogate, data, best_parameters)
+    save_candidate(
+        Path(runtime["candidate_path"]),
+        data,
+        best_parameters,
+        predicted_outputs,
+        target_vector,
+        reward_weights,
+        output_units,
+        runtime,
+    )
 
 
 if __name__ == "__main__":

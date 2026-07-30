@@ -1,0 +1,235 @@
+{
+  "dataset": {
+    "type": "sqlite",
+    "path": "quantum_simulation_surrogate.db",
+    "table": "simulation_records",
+    "where": "q3d_success = 1 AND lom_success = 1 AND q3d_matrix_complete = 1",
+    "id_column": "sample_id"
+  },
+  "features": [
+    {
+      "name": "in_qubit_rect_length",
+      "column": "in_qubit_rect_length",
+      "json_path": "qubit.rect_length",
+      "unit": "um",
+      "min": 250.0,
+      "max": 400.0
+    },
+    {
+      "name": "in_qubit_rect_width",
+      "column": "in_qubit_rect_width",
+      "json_path": "qubit.rect_width",
+      "unit": "um",
+      "min": 150.0,
+      "max": 300.0
+    },
+    {
+      "name": "in_qubit_gap_size",
+      "column": "in_qubit_gap_size",
+      "json_path": "qubit.gap_size",
+      "unit": "um",
+      "min": 30.0,
+      "max": 40.0
+    },
+    {
+      "name": "in_qubit_slit_width",
+      "column": "in_qubit_slit_width",
+      "json_path": "qubit.slit_width",
+      "unit": "um",
+      "min": 50.0,
+      "max": 70.0
+    },
+    {
+      "name": "in_qubit_q_c_dis",
+      "column": "in_qubit_q_c_dis",
+      "json_path": "qubit.q_c_dis",
+      "unit": "um",
+      "min": 90.0,
+      "max": 120.0
+    },
+    {
+      "name": "in_h_coupler_center_dis",
+      "column": "in_h_coupler_center_dis",
+      "json_path": "h_coupler.center_dis",
+      "unit": "um",
+      "min": 25.0,
+      "max": 35.0
+    },
+    {
+      "name": "in_h_coupler_arm_length",
+      "column": "in_h_coupler_arm_length",
+      "json_path": "h_coupler.arm_length",
+      "unit": "um",
+      "min": 100.0,
+      "max": 350.0
+    },
+    {
+      "name": "in_h_coupler_head1_width",
+      "column": "in_h_coupler_head1_width",
+      "json_path": "h_coupler.head1_width",
+      "unit": "um",
+      "min": 20.0,
+      "max": 120.0
+    },
+    {
+      "name": "in_h_coupler_head2_width",
+      "column": "in_h_coupler_head2_width",
+      "json_path": "h_coupler.head2_width",
+      "unit": "um",
+      "min": 20.0,
+      "max": 120.0
+    },
+    {
+      "name": "in_h_coupler_gap_size",
+      "column": "in_h_coupler_gap_size",
+      "json_path": "h_coupler.gap_size",
+      "unit": "um",
+      "min": 30.0,
+      "max": 40.0
+    }
+  ],
+  "targets": [
+    {
+      "name": "lom_Qubit_1_Ec",
+      "column": "lom_Qubit_1_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Qubit_1.Ec_MHz"
+      }
+    },
+    {
+      "name": "lom_Coupler_Ec",
+      "column": "lom_Coupler_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Coupler.Ec_MHz"
+      }
+    },
+    {
+      "name": "lom_Qubit_2_Ec",
+      "column": "lom_Qubit_2_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Qubit_2.Ec_MHz"
+      }
+    },
+    {
+      "name": "lom_g12",
+      "column": "lom_g12",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_12"
+      }
+    },
+    {
+      "name": "lom_g1c",
+      "column": "lom_g1c",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_1c"
+      }
+    },
+    {
+      "name": "lom_g2c",
+      "column": "lom_g2c",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_2c"
+      }
+    }
+  ],
+  "preprocessing": {
+    "validation_split": 0.1,
+    "random_seed": 42,
+    "fixed_std_threshold": 1e-05,
+    "drop_fixed_features": true,
+    "drop_duplicate_rows": true,
+    "outlier_z_threshold": 5.0
+  },
+  "optimization": {
+    "objectives": {
+      "lom_Qubit_1_Ec": {
+        "target": 190.0,
+        "weight": 1.0,
+        "unit": "MHz"
+      },
+      "lom_Coupler_Ec": {
+        "target": 100.0,
+        "weight": 1.0,
+        "unit": "MHz"
+      },
+      "lom_Qubit_2_Ec": {
+        "target": 190.0,
+        "weight": 1.0,
+        "unit": "MHz"
+      },
+      "lom_g12": {
+        "target": 5.0,
+        "weight": 2.0,
+        "unit": "MHz"
+      },
+      "lom_g1c": {
+        "target": 110.0,
+        "weight": 1.0,
+        "unit": "MHz"
+      },
+      "lom_g2c": {
+        "target": 110.0,
+        "weight": 1.0,
+        "unit": "MHz"
+      }
+    }
+  },
+  "training": {
+    "random_seed": 42,
+    "surrogate": {
+      "epochs": 50,
+      "batch_size": 256,
+      "lr": 0.001,
+      "weight_decay": 0.0001,
+      "early_stop": 8,
+      "hidden_dims": [256, 256, 256]
+    },
+    "sac": {
+      "lr_actor": 0.0003,
+      "lr_critic": 0.0003,
+      "lr_alpha": 0.0003,
+      "gamma": 0.99,
+      "tau": 0.005,
+      "buffer_size": 100000,
+      "batch_size": 256,
+      "warmup_steps": 1000,
+      "update_per_step": 1,
+      "init_alpha": 0.2,
+      "hidden_dims": [256, 256, 256]
+    },
+    "run": {
+      "total_steps": 10000,
+      "bc_init_samples": 5000,
+      "log_every": 500
+    }
+  },
+  "artifacts": {
+    "directory": "ai_artifacts/rect_h_v1",
+    "processed_data": "processed_data.npz",
+    "metadata": "processed_meta.json",
+    "surrogate_model": "surrogate.pt",
+    "sac_model": "sac_quantum.pt",
+    "train_history": "train_history.json",
+    "candidate": "sac_candidate.json",
+    "candidate_layout_directory": "candidate_layouts",
+    "verification_directory": "q3d_verifications"
+  },
+  "pipeline": {
+    "main_pipeline_path": "main_pipeline.py",
+    "base_layout_path": "layout_parameters.json",
+    "ai_run_name": "AI_Q3D_Verification",
+    "create_missing_json_paths": false
+  }
+}

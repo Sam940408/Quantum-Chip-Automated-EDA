@@ -46,11 +46,11 @@ EXPECTED_OUTPUTS = {
 
 # 各階段最大執行時間。Q3D 超時時只讓該樣本失敗，不讓整個批次永久卡住。
 STAGE_TIMEOUT_SECONDS = {
-    "drc_checker.py": 20,
-    "gds_generator.py": 40,
-    "q3d_auto_extraction.py": 240,  # 4分鐘
-    "lom_bridge.py": 20,
-    "spec_checker.py": 20,
+    "drc_checker.py": 60,
+    "gds_generator.py": 120,
+    "q3d_auto_extraction.py": 7200,  # 2 小時
+    "lom_bridge.py": 120,
+    "spec_checker.py": 120,
 }
 DEFAULT_STAGE_TIMEOUT_SECONDS = 600
 
@@ -236,9 +236,32 @@ def _create_new_sample_directory(sample_id: str) -> str:
     return sample_dir
 
 
+def _resolve_input_json_path(input_json: Optional[str]) -> str:
+    """解析並驗證輸入 JSON；未指定時使用專案根目錄的 layout_parameters.json。"""
+    if input_json is None:
+        candidate = os.path.join(ROOT_DIR, "layout_parameters.json")
+    else:
+        expanded = os.path.expanduser(input_json)
+        candidate = expanded if os.path.isabs(expanded) else os.path.abspath(expanded)
+
+    if not os.path.isfile(candidate):
+        raise FileNotFoundError(f"找不到輸入參數 JSON：{candidate}")
+
+    try:
+        with open(candidate, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"輸入參數 JSON 格式錯誤：{candidate} | {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"輸入參數 JSON 最外層必須是物件：{candidate}")
+    return os.path.abspath(candidate)
+
+
 def main_pipeline_entry(
     sample_id: Optional[str] = None,
     run_name: str = "LHS_Sweep",
+    input_json: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     全自動單次流水線入口。
@@ -249,9 +272,10 @@ def main_pipeline_entry(
     if sample_id is None:
         sample_id = _build_auto_sample_id()
 
-    source_json = os.path.join(ROOT_DIR, "layout_parameters.json")
-    if not os.path.exists(source_json):
-        print(f"❌ 根目錄找不到輸入參數：{source_json}")
+    try:
+        source_json = _resolve_input_json_path(input_json)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"❌ {exc}")
         return None
 
     try:
@@ -276,6 +300,7 @@ def main_pipeline_entry(
         "failure_stage": "None",
         "failure_reason": "None",
         "sample_dir": sample_dir,
+        "input_json_source": source_json,
     }
 
     print(
@@ -353,6 +378,14 @@ def _parse_arguments() -> argparse.Namespace:
         default="Manual_Run",
         help="寫入資料庫的批次名稱。",
     )
+    parser.add_argument(
+        "--input-json",
+        default=None,
+        help=(
+            "指定本次流水線使用的 layout JSON。"
+            "省略時使用專案根目錄的 layout_parameters.json。"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -362,6 +395,7 @@ if __name__ == "__main__":
         trace = main_pipeline_entry(
             sample_id=args.sample_id,
             run_name=args.run_name,
+            input_json=args.input_json,
         )
     except FileExistsError:
         sys.exit(2)
