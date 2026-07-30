@@ -1,0 +1,39 @@
+# Python 暫存檔
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# 模擬器與佈局產生的暫存檔與龐大檔案
+runs/
+*.gds
+*.aedt
+*.aedtresults/
+*.lock
+capacitance_matrix_results.json
+lom_results.json
+spec_results.json
+
+# 資料庫 (如果您不希望把幾萬筆的 DB 傳上去，可以取消註解下面這行)
+# *.db
+
+
+# 忽略虛擬環境
+.venv/
+__pycache__/
+
+# 忽略下載的論文 (假設您放在名為 papers 的資料夾，或是所有 PDF 檔)
+*.pdf
+drc_paper/
+
+
+# 忽略其他特定不能公開的腳本或檔案 (請依您的實際檔名修改)
+floating_qubit_and_floating_coupler_analysis/
+
+# 保留基礎配置範本，但不追蹤後續修改
+!layout_parameters.json
+!constraints.json

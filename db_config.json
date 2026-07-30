@@ -1,0 +1,20 @@
+{
+    "database": {
+        "db_name": "quantum_simulation.db",
+        "table_name": "simulation_records"
+    },
+    "selected_inputs": {
+        "qubit_radius": ["qubit", "radius"],
+        "qubit_gap": ["qubit", "gap_size"],
+        "coupler_length": ["coupler", "length"],
+        "coupler_arc_width": ["coupler", "arc_width"]
+    },
+    "selected_outputs": {
+        "EC1_MHz": ["qubits_parameters", "Qubit_1", "Ec_MHz"],
+        "EC2_MHz": ["qubits_parameters", "Qubit_2", "Ec_MHz"],
+        "ECc_MHz": ["qubits_parameters", "Coupler", "Ec_MHz"],
+        "g_12_MHz": ["coupling_parameters_MHz", "g_12"],
+        "g_1c_MHz": ["coupling_parameters_MHz", "g_1c"],
+        "g_2c_MHz": ["coupling_parameters_MHz", "g_2c"]
+    }
+}

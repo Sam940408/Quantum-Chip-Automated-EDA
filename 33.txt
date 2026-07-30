@@ -1,0 +1,5 @@
+py -m pip install pyaedt==0.5.0
+py -m pip install Klayout
+& C:/Users/LAB_PC/AppData/Local/Programs/Python/Python310/python.exe -m pip install --upgrade --force-reinstall clr_loader pythonnet
+py -m pip install --upgrade pythonnet clr-loader
+py -m pip install scipy

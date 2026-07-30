@@ -1,0 +1,132 @@
+{
+    "layer_name": "QuantumChip_FloatingQCQ",
+    "toggles": {
+        "enable_gnd": true,
+        "enable_qubit": true,
+        "enable_coupler": true,
+        "coupler_type": "h_shape",
+        "enable_feedline": false,
+        "qubit_type": "rect"
+    },
+    "global": {
+        "gnd_length": 5000,
+        "gnd_width": 5000
+    },
+    "qubit": {
+        "radius": 200,
+        "points": 180,
+        "rect_length": 284.709,
+        "rect_width": 187.786,
+        "round_radius": 10,
+        "gap_size": 46.707,
+        "slit_width": 52.759,
+        "cut_angle": 90,
+        "q_c_dis": 87.998,
+        "q_re_dis": 30,
+        "ec1_ghz": 0.25,
+        "ec2_ghz": 0.23
+    },
+    "coupler": {
+        "center_dis": 5.0,
+        "length": 150,
+        "half_width": 40,
+        "gap_size": 30.0,
+        "arc_width": 50,
+        "arc_start_angle": 110,
+        "arc_stop_angle": 250,
+        "safe_ext": 100,
+        "round_radius": 10
+    },
+    "t_coupler": {
+        "center_dis": 5.0,
+        "arm_length": 150,
+        "arm_width": 20,
+        "head_length": 300,
+        "head_width": 50,
+        "gap_size": 30.0,
+        "round_radius": 10
+    },
+    "h_coupler": {
+        "center_dis": 31.314,
+        "arm_length": 362.909,
+        "arm_width": 10,
+        "head1_length": 300,
+        "head1_width": 135.466,
+        "head2_length": 300,
+        "head2_width": 19.455,
+        "gap_size": 43.397,
+        "round_radius": 10
+    },
+    "resonator": {
+        "u_length_right": 600,
+        "u_length_up": 370,
+        "u_length_right2": 75,
+        "u_width": 10,
+        "arc_width": 50,
+        "arc_start_angle": -80,
+        "arc_stop_angle": 80,
+        "trace_width": 10,
+        "pitch": 60,
+        "straight_len": 300,
+        "turns": 3,
+        "round_radius": 10
+    },
+    "feedline": {
+        "start_shift_y": 400,
+        "width": 10,
+        "len_l1": 1000,
+        "len_u2": 170,
+        "len_r3": 2300,
+        "len_d4": 170,
+        "len_r5": 1675,
+        "round_radius": 30
+    },
+    "layer_mapping": {
+        "GND": 6,
+        "qubit1_left": 0,
+        "qubit1_right": 1,
+        "qubit2_left": 4,
+        "qubit2_right": 5,
+        "coupler1_left": 2,
+        "coupler1_right": 3
+    },
+    "project_settings": {
+        "project_name": "Floating_Qubit_Project",
+        "design_name": "Q3D_Extraction",
+        "setup_name": "Setup_5GHz",
+        "aedt_version": "2021.2"
+    },
+    "simulation": {
+        "adaptive_freq_ghz": 5.0
+    },
+    "Qubit_pra": {
+        "thin_cond_thickness_nm": 200.0,
+        "material_Q": "aluminum"
+    },
+    "substrate": {
+        "name": "Silicon_Substrate",
+        "material_S": "silicon",
+        "thickness": 500
+    },
+    "lom_settings": {
+        "constants": {
+            "h_bar": 1.05457180013e-34,
+            "phi0": 2.06783375846e-15,
+            "e": 1.602176620898e-19,
+            "Z0": 50
+        },
+        "frequencies": {
+            "w1": 6.6,
+            "w2": 6.7,
+            "wc": 4.0
+        },
+        "isSymmetric": 1,
+        "sweep_settings": {
+            "wc_lower_start": 4,
+            "wc_lower_stop": 6,
+            "wc_upper_start": 6,
+            "wc_upper_stop": 8,
+            "num_points": 10000
+        }
+    }
+}

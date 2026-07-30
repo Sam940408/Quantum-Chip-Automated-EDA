@@ -1,0 +1,128 @@
+{
+    "qubit": {
+        "gap_size": {
+            "min": 30.0,
+            "max": 50.0
+        },
+        "radius": {
+            "min": 50.0,
+            "max": 500.0
+        },
+        "slit_width": {
+            "min": 50.0,
+            "max": 70.0
+        },
+        "rect_length": {
+            "min": 50.0,
+            "max": 1000.0
+        },
+        "rect_width": {
+            "min": 50.0,
+            "max": 1000.0
+        },
+        "q_c_dis": {
+            "min": 70.0,
+            "max": 120.0
+        }
+    },
+    "coupler": {
+        "arc_width": {
+            "min": 10.0,
+            "max": 100.0
+        },
+        "gap_size": {
+            "min": 30.0,
+            "max": 50.0
+        },
+        "center_dis": {
+            "min": 5.0,
+            "max": 15.0
+        },
+        "length": {
+            "min": 50.0,
+            "max": 1000.0
+        },
+        "round_radius": {
+            "min": 0,
+            "max": 20.0
+        }
+    },
+    "t_coupler": {
+        "arm_length": {
+            "min": 50.0,
+            "max": 500.0
+        },
+        "arm_width": {
+            "min": 5.0,
+            "max": 100.0
+        },
+        "head_width": {
+            "min": 10.0,
+            "max": 200.0
+        },
+        "gap_size": {
+            "min": 30.0,
+            "max": 50.0
+        },
+        "center_dis": {
+            "min": 5.0,
+            "max": 15.0
+        },
+        "round_radius": {
+            "min": 0,
+            "max": 20.0
+        }
+    },
+    "h_coupler": {
+        "arm_length": {
+            "min": 50.0,
+            "max": 500.0
+        },
+        "head1_width": {
+            "min": 10.0,
+            "max": 200.0
+        },
+        "head2_width": {
+            "min": 10.0,
+            "max": 200.0
+        },
+        "gap_size": {
+            "min": 30.0,
+            "max": 50.0
+        },
+        "center_dis": {
+            "min": 25.0,
+            "max": 35.0
+        },
+        "round_radius": {
+            "min": 10,
+            "max": 10.0
+        }
+    },
+    "feedline": {},
+    "global": {},
+    "lom_settings": {
+        "frequencies": {
+            "w1": {
+                "min": 4,
+                "max": 8.0
+            },
+            "w2": {
+                "min": 4,
+                "max": 8.0
+            }
+        }
+    },
+    "Qubit_pra": {
+        "thin_cond_thickness_nm": {
+            "min": 50,
+            "max": 200
+        }
+    },
+    "substrate": {
+        "thickness": {
+            "min": 500,
+            "max": 500.0
+        }
+    }
+}
