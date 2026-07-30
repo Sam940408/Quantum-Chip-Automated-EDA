@@ -124,7 +124,8 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "project_name": "Floating_Qubit_Project",
             "design_name": "Q3D_Extraction",
             "setup_name": "Setup_5GHz",
-            "aedt_version": "2021.2"
+            "aedt_version": "2021.2",
+            "non_graphical": False#先使用 False，因為第一次需要看 AEDT 是否正確匯入 GDS、辨識七個導體與執行 Setup。單筆成功後，再改成：True
         },
         
         "simulation": {

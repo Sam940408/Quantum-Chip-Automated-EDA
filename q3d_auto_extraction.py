@@ -396,7 +396,7 @@ def run_q3d_extraction(json_file: str) -> int:
             try:
                 # 僅釋放 Python 連線，不強制關閉使用者的 AEDT 視窗。
                 app.release_desktop(
-                    close_projects=False,
+                    close_projects=True,
                     close_desktop=False,
                 )
             except Exception as exc:

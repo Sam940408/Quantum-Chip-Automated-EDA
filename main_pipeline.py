@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,7 +20,9 @@ PIPELINE_SWITCHES = {
     "gds_generator": True,
     "q3d_extraction": True,
     "lom_bridge": True,
-    "spec_check": True,
+    # 資料產生階段先關閉 Spec，避免規格不通過時中斷 Q3D/LOM 資料收集。
+    # 完成 spec_results.json 與連續指標輸出後可再改回 True。
+    "spec_check": False,
     "db_manager": True,
 }
 
@@ -42,6 +43,16 @@ EXPECTED_OUTPUTS = {
     "q3d_extraction": "capacitance_matrix_results.json",
     "lom_bridge": "lom_results.json",
 }
+
+# 各階段最大執行時間。Q3D 超時時只讓該樣本失敗，不讓整個批次永久卡住。
+STAGE_TIMEOUT_SECONDS = {
+    "drc_checker.py": 20,
+    "gds_generator.py": 40,
+    "q3d_auto_extraction.py": 240,  # 4分鐘
+    "lom_bridge.py": 20,
+    "spec_checker.py": 20,
+}
+DEFAULT_STAGE_TIMEOUT_SECONDS = 600
 
 
 def calculate_param_hash(json_path: str) -> str:
@@ -98,6 +109,15 @@ def _write_stage_log(
     return log_path
 
 
+def _normalize_subprocess_output(output: Any) -> str:
+    """將 TimeoutExpired 可能回傳的 bytes/str 統一轉成字串。"""
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return str(output)
+
+
 def execute_sub_script(
     script_name: str,
     work_dir: str,
@@ -112,6 +132,11 @@ def execute_sub_script(
     if arg_input:
         command.extend(["-i", arg_input])
 
+    timeout_seconds = STAGE_TIMEOUT_SECONDS.get(
+        script_name,
+        DEFAULT_STAGE_TIMEOUT_SECONDS,
+    )
+
     try:
         result = subprocess.run(
             command,
@@ -121,6 +146,7 @@ def execute_sub_script(
             encoding="utf-8",
             errors="replace",
             check=False,
+            timeout=timeout_seconds,
         )
 
         log_path = _write_stage_log(
@@ -131,7 +157,6 @@ def execute_sub_script(
             stderr=result.stderr,
             return_code=result.returncode,
         )
-
         combined_output = "\n".join(
             text.strip()
             for text in [result.stdout, result.stderr]
@@ -149,8 +174,42 @@ def execute_sub_script(
 
         return True, f"Success | Log: {log_path}"
 
+    except subprocess.TimeoutExpired as exc:
+        stdout = _normalize_subprocess_output(exc.stdout)
+        stderr = _normalize_subprocess_output(exc.stderr)
+        timeout_message = f"TIMEOUT AFTER {timeout_seconds} SECONDS"
+        stderr = f"{stderr}\n{timeout_message}" if stderr else timeout_message
+
+        log_path = _write_stage_log(
+            work_dir=work_dir,
+            script_name=script_name,
+            command=command,
+            stdout=stdout,
+            stderr=stderr,
+            return_code=-1,
+        )
+        return (
+            False,
+            f"{script_name} 執行超過 {timeout_seconds} 秒，"
+            f"已停止該筆樣本。Log: {log_path}",
+        )
+
     except Exception as exc:
-        return False, f"執行 {script_name} 發生例外：{exc}"
+        error_message = f"執行 {script_name} 發生例外：{exc}"
+        try:
+            log_path = _write_stage_log(
+                work_dir=work_dir,
+                script_name=script_name,
+                command=command,
+                stdout="",
+                stderr=error_message,
+                return_code=-2,
+            )
+            error_message = f"{error_message} | Log: {log_path}"
+        except Exception:
+            # 即使 log 寫入也失敗，仍回傳原始錯誤，不遮蔽真正例外。
+            pass
+        return False, error_message
 
 
 def _build_auto_sample_id() -> str:
@@ -166,7 +225,6 @@ def _create_new_sample_directory(sample_id: str) -> str:
     """
     os.makedirs(RUNS_DIR, exist_ok=True)
     sample_dir = os.path.join(RUNS_DIR, sample_id)
-
     try:
         os.mkdir(sample_dir)
     except FileExistsError as exc:
@@ -235,7 +293,6 @@ def main_pipeline_entry(
             if key in {"gds_generator", "q3d_extraction"}
             else None
         )
-
         success, message = execute_sub_script(
             script_name=script_name,
             work_dir=sample_dir,
@@ -245,7 +302,10 @@ def main_pipeline_entry(
         # 子程式即使錯誤地回傳 0，也必須確認必要輸出檔真的存在且非空。
         if success and key in EXPECTED_OUTPUTS:
             expected_path = os.path.join(sample_dir, EXPECTED_OUTPUTS[key])
-            if not os.path.isfile(expected_path) or os.path.getsize(expected_path) == 0:
+            if (
+                not os.path.isfile(expected_path)
+                or os.path.getsize(expected_path) == 0
+            ):
                 success = False
                 message = f"必要輸出不存在或為空檔：{expected_path}"
 
