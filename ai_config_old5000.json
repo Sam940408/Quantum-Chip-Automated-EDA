@@ -7,66 +7,90 @@
     "id_column": null
   },
   "features": [
-  {
-    "name": "qubit_radius",
-    "column": "qubit_radius",
-    "json_path": "qubit.radius",
-    "unit": "um"
-  },
-  {
-    "name": "qubit_gap",
-    "column": "qubit_gap",
-    "json_path": "qubit.gap_size",
-    "unit": "um"
-  },
-  {
-    "name": "coupler_length",
-    "column": "coupler_length",
-    "json_path": "coupler.length",
-    "unit": "um"
-  },
-  {
-    "name": "coupler_arc_width",
-    "column": "coupler_arc_width",
-    "json_path": "coupler.arc_width",
-    "unit": "um"
-  }
+    {
+      "name": "qubit_radius",
+      "column": "qubit_radius",
+      "json_path": "qubit.radius",
+      "unit": "um"
+    },
+    {
+      "name": "qubit_gap",
+      "column": "qubit_gap",
+      "json_path": "qubit.gap_size",
+      "unit": "um"
+    },
+    {
+      "name": "coupler_length",
+      "column": "coupler_length",
+      "json_path": "coupler.length",
+      "unit": "um"
+    },
+    {
+      "name": "coupler_arc_width",
+      "column": "coupler_arc_width",
+      "json_path": "coupler.arc_width",
+      "unit": "um"
+    }
   ],
 
 
 
   "targets": [
-  {
-    "name": "EC1_MHz",
-    "column": "EC1_MHz",
-    "unit": "MHz"
-  },
-  {
-    "name": "ECc_MHz",
-    "column": "ECc_MHz",
-    "unit": "MHz"
-  },
-  {
-    "name": "EC2_MHz",
-    "column": "EC2_MHz",
-    "unit": "MHz"
-  },
-  {
-    "name": "g_12_MHz",
-    "column": "g_12_MHz",
-    "unit": "MHz"
-  },
-  {
-    "name": "g_1c_MHz",
-    "column": "g_1c_MHz",
-    "unit": "MHz"
-  },
-  {
-    "name": "g_2c_MHz",
-    "column": "g_2c_MHz",
-    "unit": "MHz"
-  }
-   ],
+    {
+      "name": "EC1_MHz",
+      "column": "lom_Qubit_1_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Qubit_1.Ec_MHz"
+      }
+    },
+    {
+      "name": "ECc_MHz",
+      "column": "lom_Coupler_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Coupler.Ec_MHz"
+      }
+    },
+    {
+      "name": "EC2_MHz",
+      "column": "lom_Qubit_2_Ec",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "qubits_parameters.Qubit_2.Ec_MHz"
+      }
+    },
+    {
+      "name": "g_12_MHz",
+      "column": "lom_g12",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_12"
+      }
+    },
+    {
+      "name": "g_1c_MHz",
+      "column": "lom_g1c",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_1c"
+      }
+    },
+    {
+      "name": "g_2c_MHz",
+      "column": "lom_g2c",
+      "unit": "MHz",
+      "verification": {
+        "file": "lom_results.json",
+        "json_path": "coupling_parameters_MHz.g_2c"
+      }
+    }
+  ],
  
 
   "preprocessing": {
