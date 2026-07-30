@@ -10,87 +10,155 @@ except ImportError:
     print("❌ 錯誤：找不到 lom_bridge.py，請確認腳本位置。")
     sys.exit(1)
 
+# ==========================================
+# 老師指定的硬性 QCQ 規格
+# ==========================================
+FREQ_MIN = 4.0       # GHz
+FREQ_MAX = 8.0       # GHz
+DETUNING_MIN = 0.300 # GHz
+G_ENT_MIN = 5.0      # MHz
+
 def run_spec_check():
     layout_json = "layout_parameters.json"
     q3d_json = "capacitance_matrix_results.json"
+    spec_json_path = "spec_results.json"
+
+    # 預設輸出資料結構，確保即使提早結束也有資料可以寫入
+    spec_data = {
+        "wc_at_g_zero_GHz": None,
+        "wc_at_ent_GHz": None,
+        "g_ent_max_MHz": None,
+        "detuning_at_ent_MHz": None,
+        "spec_pass": 0
+    }
+    
+    def save_and_exit():
+        """統一的存檔與退出出口，確保 db_manager 能接手處理"""
+        try:
+            with open(spec_json_path, "w", encoding="utf-8") as f:
+                json.dump(spec_data, f, indent=4, ensure_ascii=False)
+            print(f"💾 規格數據已匯出至: {spec_json_path}")
+        except Exception as e:
+            print(f"⚠️ 寫入 {spec_json_path} 失敗: {e}")
+        # 無論規格是否達標，都正常退出 (0)，讓自動化工作流繼續走到歸檔步驟！
+        sys.exit(0)
 
     # ==========================================
-    # 1. 讀取頻率與設定嚴格的物理門檻
+    # 1. 讀取並驗證 Qubit 頻率限制
     # ==========================================
     if not os.path.exists(layout_json):
-        sys.exit(1)
+        raise FileNotFoundError(f"找不到 {layout_json}")
+        
     with open(layout_json, 'r', encoding='utf-8') as f:
         params = json.load(f)
     
     freqs = params.get("lom_settings", {}).get("frequencies", {})
-    w1 = freqs.get("w1", 6.6)
-    w2 = freqs.get("w2", 6.7)
+    w1 = freqs.get("w1")
+    w2 = freqs.get("w2")
+    
+    if w1 is None or w2 is None:
+        raise ValueError("❌ layout_parameters.json 必須提供 w1 與 w2")
 
-    # 非諧性 (Anharmonicity) 絕對值設定 (單位：GHz)
-    # 若 JSON 中沒有，則預設採用典型 Transmon 數值 (約 200~300 MHz)
-    eta_1 = params.get("lom_settings", {}).get("eta_1", 0.22)
-    eta_2 = params.get("lom_settings", {}).get("eta_2", 0.22)
-    eta_c = params.get("lom_settings", {}).get("eta_c", 0.25)
+    spec_pass_flag = 1
 
-    # 嚴格的色散區間門檻 (確保微擾理論與隔離度高度可靠)
-    R_DISP_LIMIT = 0.12
-    # 開啟狀態 (On-state) 的 wc 上限
-    wc_max_limit = min(w1, w2) - 0.05
+    # 如果頻率不在 4~8 GHz，標記為不合格，但不中斷
+    if not (FREQ_MIN <= w1 <= FREQ_MAX) or not (FREQ_MIN <= w2 <= FREQ_MAX):
+        print(f"⚠️ 警告：Qubit 頻率超出 4–8 GHz 範圍 (w1={w1:.3f}, w2={w2:.3f})")
+        spec_pass_flag = 0
+
+    wc_min_limit = FREQ_MIN
+    wc_max_limit = min(FREQ_MAX, min(w1, w2) - DETUNING_MIN)
+
+    # 如果連合理的 Coupler 掃描頻帶都沒有，直接存檔紀錄失敗並結束本腳本
+    if wc_max_limit <= wc_min_limit:
+        print(f"⚠️ 警告：沒有合法的 coupler 頻帶 (需 4 GHz <= wc <= {wc_max_limit:.3f} GHz)")
+        spec_data["spec_pass"] = 0
+        save_and_exit() 
 
     # ==========================================
-    # 2. 解析 Q3D 矩陣與動態舒爾補數降階
+    # 2. 解析 Q3D 矩陣與拓樸防呆驗證
     # ==========================================
     if not os.path.exists(q3d_json):
-        sys.exit(1)
-    CM, nodes = parse_q3d_json(q3d_json)
+        raise FileNotFoundError(f"找不到 {q3d_json}")
+        
+    CM_raw, nodes_raw = parse_q3d_json(q3d_json)
+    CM = np.asarray(CM_raw, dtype=float)
+    nodes = list(nodes_raw)
+    CM_reduced = CM.copy()
+
+    node_labels = [str(n).lower() for n in nodes]
+    gnd_candidates = [i for i, n in enumerate(node_labels) if "gnd" in n]
     
-    gnd_idx = next((i for i, n in enumerate(nodes) if "GND" in n.upper()), -1)
-    if gnd_idx == -1:
-        print("⚠️ 警告：找不到 GND 節點，假設矩陣已經降階或無接地。")
-    else:
-        CM_reduced = np.delete(CM, gnd_idx, axis=0)
+    if len(gnd_candidates) > 1:
+        raise ValueError(f"❌ 找到多個 GND 節點: {gnd_candidates}")
+    
+    if len(gnd_candidates) == 1:
+        gnd_idx = gnd_candidates[0]
+        CM_reduced = np.delete(CM_reduced, gnd_idx, axis=0)
         CM_reduced = np.delete(CM_reduced, gnd_idx, axis=1)
-        nodes.pop(gnd_idx)
+        node_labels.pop(gnd_idx)
+    else:
+        print("⚠️ 找不到顯式 GND，假設輸入矩陣已經以 reference conductor 降階。")
 
-    N = len(nodes)
-    id_q1_p = [i for i, n in enumerate(nodes) if "qubit1" in n]
-    id_q2_p = [i for i, n in enumerate(nodes) if "qubit2" in n]
-    id_c_p  = [i for i, n in enumerate(nodes) if "coupler1" in n]
+    id_q1_p = [i for i, n in enumerate(node_labels) if "qubit1" in n]
+    id_q2_p = [i for i, n in enumerate(node_labels) if "qubit2" in n]
+    id_c_p  = [i for i, n in enumerate(node_labels) if "coupler1" in n]
 
+    groups = {"qubit1": id_q1_p, "qubit2": id_q2_p, "coupler1": id_c_p}
+    for name, ids in groups.items():
+        if len(ids) != 2:
+            raise ValueError(f"❌ {name} 必須剛好找到 2 個 pad，目前找到 {len(ids)} 個: {ids}")
+
+    if CM_reduced.shape != (len(node_labels), len(node_labels)):
+        raise ValueError("❌ 電容矩陣尺寸與 nodes 數量不一致")
+
+    # ==========================================
+    # 3. 舒爾補數降階與數值穩定性防護
+    # ==========================================
+    N = len(node_labels)
     M_trans = np.eye(N)
-    if len(id_q1_p) == 2: M_trans[np.ix_(id_q1_p, id_q1_p)] = [[1, -1], [1, 1]]
-    if len(id_q2_p) == 2: M_trans[np.ix_(id_q2_p, id_q2_p)] = [[1, -1], [1, 1]]
-    if len(id_c_p) == 2:  M_trans[np.ix_(id_c_p, id_c_p)] = [[1, -1], [1, 1]]
+    M_trans[np.ix_(id_q1_p, id_q1_p)] = [[1, -1], [1, 1]]
+    M_trans[np.ix_(id_q2_p, id_q2_p)] = [[1, -1], [1, 1]]
+    M_trans[np.ix_(id_c_p, id_c_p)] = [[1, -1], [1, 1]]
 
     M_inv = np.linalg.inv(M_trans)
     C_mode = M_inv.T @ CM_reduced @ M_inv
 
-    id_q = []
-    if id_q1_p: id_q.append(id_q1_p[0])
-    if id_c_p:  id_q.append(id_c_p[0])
-    if id_q2_p: id_q.append(id_q2_p[0])
-    
+    id_q = [id_q1_p[0], id_c_p[0], id_q2_p[0]]
     id_f = [i for i in range(N) if i not in id_q]
     id_reorder = id_q + id_f
     C_temp = C_mode[np.ix_(id_reorder, id_reorder)]
 
     M_q = len(id_q)
     Cqq = C_temp[:M_q, :M_q]
-    Cqx = C_temp[:M_q, M_q:]
-    Cxq = C_temp[M_q:, :M_q]
-    Cxx = C_temp[M_q:, M_q:]
-
+    
     if len(id_f) > 0:
-        Ceff = Cqq - Cqx @ np.linalg.inv(Cxx) @ Cxq
+        Cqx = C_temp[:M_q, M_q:]
+        Cxq = C_temp[M_q:, :M_q]
+        Cxx = C_temp[M_q:, M_q:]
+        Ceff = Cqq - Cqx @ np.linalg.solve(Cxx, Cxq)
     else:
         Ceff = Cqq
         
+    Ceff = 0.5 * (Ceff + Ceff.T)
+
+    if not np.all(np.isfinite(Ceff)):
+        raise ValueError("❌ Ceff 含有 NaN 或 Inf")
+
+    eigvals = np.linalg.eigvalsh(Ceff)
+    if np.min(eigvals) <= 0:
+        raise ValueError(f"❌ Ceff 不是正定矩陣，最小 eigenvalue={np.min(eigvals):.3e}")
+
+    cond_ceff = np.linalg.cond(Ceff)
+    if cond_ceff > 1e12:
+        raise ValueError(f"❌ Ceff condition number 過大: {cond_ceff:.3e}")
+
     C_inv = np.linalg.inv(Ceff)
     Cinv_11, Cinv_cc, Cinv_22 = C_inv[0, 0], C_inv[1, 1], C_inv[2, 2]
     Cinv_1c, Cinv_12, Cinv_2c = C_inv[0, 1], C_inv[0, 2], C_inv[2, 1]
 
     # ==========================================
-    # 3. 建立核心物理計算函數
+    # 4. 核心物理計算
     # ==========================================
     def calc_couplings(wc):
         g12 = 0.5 * (Cinv_12 / np.sqrt(Cinv_11 * Cinv_22)) * np.sqrt(w1 * w2)
@@ -104,113 +172,65 @@ def run_spec_check():
         g_virtual = 0.5 * g1c * g2c * detuning_term
         return (g12 - g_virtual) * 1000
 
-    def calc_rdisp(wc):
-        _, g1c, g2c = calc_couplings(wc)
-        r1 = np.abs(g1c / (wc - w1))
-        r2 = np.abs(g2c / (wc - w2))
-        return max(r1, r2)
-
-    def calc_zz(wc):
-        """根據論文 Eq. 10 & 11 計算殘餘 ZZ 耦合 (單位：MHz)"""
-        g12, g1c, g2c = calc_couplings(wc)
-        d12 = w1 - w2
-        d1 = wc - w1
-        d2 = wc - w2
-        
-        # Eq. 10: 領頭靜態項 (Static ZZ)
-        zeta_2 = -(2 * g12**2 * (eta_1 + eta_2)) / ((d12 - eta_1) * (d12 + eta_2))
-        
-        # Eq. 11: 磁通依賴高階項 (Flux-dependent ZZ)
-        term1 = (1/d2) * (1/d12 + 2/(-d12 + eta_1))
-        term2 = (1/d1) * (2/(d12 + eta_2) - 1/d12)
-        part1 = -(2 * g12 * g1c * g2c) * (term1 + term2)
-        
-        part2 = -(2 * g1c**2 * g2c**2) / (d1 + d2 + eta_c) * (1/d1 + 1/d2)**2
-        part3 = (g1c**2 * g2c**2) / (d1**2) * (2/(d12 + eta_2) - 1/d12 + 1/d2)
-        part4 = (g1c**2 * g2c**2) / (d2**2) * (2/(-d12 + eta_1) + 1/d12 + 1/d1)
-        
-        zeta_3_4 = part1 + part2 + part3 + part4
-        
-        return (zeta_2 + zeta_3_4) * 1000
-
-    # 檢查對稱式設計的符號先決條件
-    g12_static, g1c_static, g2c_static = calc_couplings(wc_max_limit)
-    if g12_static * (g1c_static * g2c_static) > 0:
-        print("🛑 [物理淘汰] 符號審查失敗：g12 與 g1c*g2c 符號相同，無法在下方形成零點。")
-        sys.exit(1)
-
     # ==========================================
-    # 4. 尋找 Dual-Zero 甜蜜點
+    # 5. 尋找關閉點 (g=0) 與檢驗 On-state
     # ==========================================
-    wc_array = np.linspace(1.0, wc_max_limit, 2000)
-    gnet_array = np.array([calc_gnet(w) for w in wc_array])
-    rdisp_array = np.array([calc_rdisp(w) for w in wc_array])
+    wc_array = np.linspace(wc_min_limit, wc_max_limit, 2000)
+    gnet_array = np.array([calc_gnet(wc) for wc in wc_array])
 
-    # 尋找 g_net = 0
-    signs_g = np.sign(gnet_array)
-    sign_changes_g = np.where(signs_g[:-1] != signs_g[1:])[0]
-    
-    valid_g_zeros = []
-    for idx in sign_changes_g:
+    if not np.all(np.isfinite(gnet_array)):
+        raise ValueError("❌ gnet_array 出現 NaN 或 Inf")
+
+    zero_brackets = np.where(gnet_array[:-1] * gnet_array[1:] <= 0)[0]
+    g_zero_roots = []
+
+    for idx in zero_brackets:
+        a = wc_array[idx]
+        b = wc_array[idx + 1]
         try:
-            root_wc = brentq(calc_gnet, wc_array[idx], wc_array[idx+1])
-            if calc_rdisp(root_wc) <= R_DISP_LIMIT:
-                valid_g_zeros.append(root_wc)
+            root = brentq(calc_gnet, a, b)
+            if abs(calc_gnet(root)) < 1e-3: 
+                g_zero_roots.append(root)
         except ValueError:
             pass
 
-    if not valid_g_zeros:
-        print(f"🛑 [物理淘汰] 在色散區間內 (r_disp <= {R_DISP_LIMIT})，找不到 g_net = 0。")
-        sys.exit(1)
-        
-    wc_at_g_zero = valid_g_zeros[-1]
-    zz_at_g_zero = calc_zz(wc_at_g_zero)
-
-    # 審查 On-state 效能
-    valid_mask = rdisp_array <= R_DISP_LIMIT
-    valid_wc = wc_array[valid_mask]
-    valid_gnet = gnet_array[valid_mask]
-    
-    if len(valid_gnet) == 0 or np.max(np.abs(valid_gnet)) < 5.0:
-        print(f"🛑 [物理淘汰] 色散區間內最大有效耦合小於 5 MHz。")
-        sys.exit(1)
-
-    target_idx = np.where(np.abs(valid_gnet) >= 5.0)[0][-1]
-    wc_at_target = valid_wc[target_idx]
-    gnet_at_target = valid_gnet[target_idx]
-
-    # 進階 ZZ 審查：是否能找到真正的 ZZ=0？
-    zz_array = np.array([calc_zz(w) for w in wc_array])
-    signs_zz = np.sign(zz_array)
-    sign_changes_zz = np.where(signs_zz[:-1] != signs_zz[1:])[0]
-    
-    wc_at_zz_zero = None
-    for idx in sign_changes_zz:
-        try:
-            root_zz = brentq(calc_zz, wc_array[idx], wc_array[idx+1])
-            if calc_rdisp(root_zz) <= R_DISP_LIMIT:
-                wc_at_zz_zero = root_zz
-                break
-        except ValueError:
-            pass
-
-    # ==========================================
-    # 5. 放行與報告
-    # ==========================================
-    print(f"✅ [黃金參數誕生] 物理審查完美達標！")
-    print(f"   🔹 交換耦合關閉點 (g = 0): 位於 wc = {wc_at_g_zero:.3f} GHz")
-    print(f"      -> 該點的殘餘串擾 (ZZ): {zz_at_g_zero:.3f} MHz")
-    
-    if wc_at_zz_zero:
-        print(f"   🌟 完美相位關閉點 (ZZ = 0): 位於 wc = {wc_at_zz_zero:.3f} GHz")
-        frequency_mismatch = abs(wc_at_g_zero - wc_at_zz_zero) * 1000
-        print(f"      -> Dual-Zero 頻率錯位僅: {frequency_mismatch:.1f} MHz")
+    wc_at_g_zero = None
+    if not g_zero_roots:
+        print("⚠️ 警告：在 4–8 GHz 且 detuning >= 300 MHz 的範圍內找不到 g=0 的關閉點。")
+        spec_pass_flag = 0
     else:
-        print(f"   ⚠️ 未在色散極限內找到完全的 ZZ = 0，需依賴 g=0 點運作。")
+        wc_at_g_zero = g_zero_roots[-1]
 
-    print(f"   🔹 強力開啟點 (g = {gnet_at_target:.2f} MHz): 位於 wc = {wc_at_target:.3f} GHz")
+    ent_idx = np.argmax(np.abs(gnet_array))
+    wc_at_ent = wc_array[ent_idx]
+    g_ent_signed = gnet_array[ent_idx]
+    g_ent = abs(g_ent_signed)
+
+    if g_ent <= G_ENT_MIN:
+        print(f"⚠️ 警告：最大 g_ent 僅 {g_ent:.3f} MHz，未達 {G_ENT_MIN:.1f} MHz 門檻。")
+        spec_pass_flag = 0
+
+    # ==========================================
+    # 6. 輸出最終報告與儲存 JSON
+    # ==========================================
+    if spec_pass_flag == 1:
+        print("✅ 晶片符合老師指定的 QCQ 規格")
+    else:
+        print("❌ 晶片未達理想規格，但已紀錄特徵用於模型訓練。")
+        
+    print(f"   🔹 Qubit frequencies: w1={w1:.3f} GHz, w2={w2:.3f} GHz")
+    if wc_at_g_zero:
+        print(f"   🔹 關閉點: wc={wc_at_g_zero:.3f} GHz, g={calc_gnet(wc_at_g_zero):.6f} MHz")
+    print(f"   🔹 開啟點: wc={wc_at_ent:.3f} GHz, g_ent={g_ent:.3f} MHz")
+    print(f"   🔹 開啟點 detuning: {(min(w1, w2) - wc_at_ent) * 1000:.1f} MHz")
+
+    spec_data["wc_at_g_zero_GHz"] = round(float(wc_at_g_zero), 4) if wc_at_g_zero else None
+    spec_data["wc_at_ent_GHz"] = round(float(wc_at_ent), 4)
+    spec_data["g_ent_max_MHz"] = round(float(g_ent), 4)
+    spec_data["detuning_at_ent_MHz"] = round(float((min(w1, w2) - wc_at_ent) * 1000), 2)
+    spec_data["spec_pass"] = spec_pass_flag
     
-    sys.exit(0)
+    save_and_exit()
 
 if __name__ == "__main__":
     run_spec_check()

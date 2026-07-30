@@ -36,12 +36,15 @@ def run_q3d_extraction(json_file):
     
     # 從 global 取得晶片總長寬 (由接地 GND 決定)
     chip_len_um = float(params.get("global", {}).get("gnd_length", 5000))
-    chip_wid_um = float(params.get("global", {}).get("gnd_width", 2000))
+    chip_wid_um = float(params.get("global", {}).get("gnd_width", 5000))
 
     # 3. 檔案路徑
     gds_file = os.path.abspath("quantum_chip_final.gds")
     matrix_path = os.path.abspath("capacitance_matrix_results.json")
-    
+
+    if os.path.exists(matrix_path):
+        os.remove(matrix_path)
+        
     if not os.path.exists(gds_file):
         print(f"❌ 錯誤：找不到 GDS 檔案 '{gds_file}'，請先執行 gds_generator.py")
         return 1

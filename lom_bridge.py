@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 import re
 from datetime import datetime
@@ -214,7 +215,8 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     q3d_json_path = "capacitance_matrix_results.json"
     output_json_path = "lom_results.json"
-    
+    if os.path.exists(output_json_path):
+        os.remove(output_json_path)
     try:
         CM, nodes = parse_q3d_json(q3d_json_path)
         final_results = calculate_lom_parameters(CM, nodes, w_vector, h_bar, e)

@@ -4,10 +4,20 @@
         "table_name": "simulation_records"
     },
     "selected_inputs": {
-        "qubit_radius": ["qubit", "radius"],
+        "qubit_rect_width": ["qubit", "rect_width"],
+        "qubit_rect_length": ["qubit", "rect_length"],
+        "qubit_slit_width": ["qubit", "slit_width"],
+        "qubit_q_c_dis": ["qubit", "q_c_dis"],
         "qubit_gap": ["qubit", "gap_size"],
-        "coupler_length": ["coupler", "length"],
-        "coupler_arc_width": ["coupler", "arc_width"]
+
+        "coupler_center_dis": ["h_coupler", "center_dis"],
+        "coupler_arm_width": ["h_coupler", "arm_width"],
+        "coupler_arm_length": ["h_coupler", "arm_length"],
+        "coupler_head1_length": ["h_coupler", "head1_length"],
+        "coupler_head1_width": ["h_coupler", "head1_width"],
+        "coupler_head2_length": ["h_coupler", "head2_length"],
+        "coupler_head2_width": ["h_coupler", "head2_width"],
+        "coupler_gap": ["h_coupler", "gap_size"]
     },
     "selected_outputs": {
         "EC1_MHz": ["qubits_parameters", "Qubit_1", "Ec_MHz"],

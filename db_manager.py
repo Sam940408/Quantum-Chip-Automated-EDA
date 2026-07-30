@@ -2,6 +2,9 @@ import json
 import os
 import re
 import sqlite3
+import sys
+import time
+import uuid
 from typing import Any, Dict, Optional
 
 
@@ -190,8 +193,6 @@ def _flatten_numeric_sections(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _sqlite_type(column_name: str, value: Any) -> str:
-    # Q3D矩陣欄位即使第一筆資料缺失為 None，也必須先建立為 REAL，
-    # 否則 SQLite 可能因第一筆失敗樣本而把整欄建立成 TEXT。
     if column_name.startswith("C_"):
         return "REAL"
     if column_name in {
@@ -219,13 +220,94 @@ def _validate_identifier(identifier: str) -> str:
     return identifier
 
 
+_MISSING = object()
+
+
+def _get_nested_value(data: Dict[str, Any], path: list) -> Any:
+    """依照 db_config.json 的鍵路徑讀取巢狀 JSON 值。"""
+    current: Any = data
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return _MISSING
+        current = current[key]
+    return current
+
+
+def _extract_selected_fields(
+    data: Dict[str, Any],
+    selections: Dict[str, Any],
+    prefix: str,
+) -> Dict[str, Any]:
+    """
+    依照 db_config.json 的 selected_inputs/selected_outputs 擷取欄位。
+
+    設定中的 alias 會轉為 SQLite 欄位名稱，例如：
+      qubit_gap -> in_qubit_gap
+      EC1_MHz   -> out_EC1_MHz
+    """
+    result: Dict[str, Any] = {}
+
+    for alias, path in selections.items():
+        if (
+            not isinstance(path, list)
+            or not path
+            or not all(isinstance(key, str) and key for key in path)
+        ):
+            raise ValueError(
+                f"db_config.json 欄位 {alias!r} 的路徑必須是非空字串陣列。"
+            )
+
+        column_name = _validate_identifier(f"{prefix}_{alias}")
+        value = _get_nested_value(data, path)
+
+        if value is _MISSING:
+            print(
+                f"⚠️ 選定欄位 {column_name} 找不到路徑 "
+                f"{'.'.join(path)}，本筆將寫入 NULL。"
+            )
+            result[column_name] = None
+        elif isinstance(value, (dict, list, tuple)):
+            result[column_name] = json.dumps(value, ensure_ascii=False)
+        else:
+            result[column_name] = value
+
+    return result
+
+
 def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
     """
     讀取單一 sample 工作資料夾內的成果物，並將完整資料寫入 SQLite。
-
-    注意：使用普通 INSERT 而不是 INSERT OR REPLACE。
-    若 sample_id 重複，資料庫會直接報錯，避免靜默覆蓋舊樣本。
     """
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(module_dir, "db_config.json")
+
+    config_data: Dict[str, Any] = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as file:
+                loaded_config = json.load(file)
+            if not isinstance(loaded_config, dict):
+                raise ValueError("設定檔最外層必須是 JSON 物件。")
+            config_data = loaded_config
+        except Exception as exc:
+            print(f"⚠️ 讀取 db_config.json 失敗，採用預設設定：{exc}")
+
+    db_cfg = config_data.get("database", {})
+    if not isinstance(db_cfg, dict):
+        raise ValueError("db_config.json 的 database 必須是 JSON 物件。")
+
+    db_name = str(db_cfg.get("db_name", "quantum_simulation.db"))
+    table_name = _validate_identifier(
+        str(db_cfg.get("table_name", "simulation_records"))
+    )
+
+    selected_inputs = config_data.get("selected_inputs", {})
+    selected_outputs = config_data.get("selected_outputs", {})
+    if not isinstance(selected_inputs, dict):
+        raise ValueError("db_config.json 的 selected_inputs 必須是 JSON 物件。")
+    if not isinstance(selected_outputs, dict):
+        raise ValueError("db_config.json 的 selected_outputs 必須是 JSON 物件。")
+
     sample_dir = os.path.abspath(trace_record["sample_dir"])
     layout_path = os.path.join(sample_dir, "layout_parameters.json")
     q3d_path = os.path.join(sample_dir, "capacitance_matrix_results.json")
@@ -235,7 +317,16 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
     input_flat: Dict[str, Any] = {}
     if os.path.exists(layout_path):
         with open(layout_path, "r", encoding="utf-8") as file:
-            input_flat = _flatten_numeric_sections(json.load(file))
+            layout_data = json.load(file)
+
+        if selected_inputs:
+            input_flat = _extract_selected_fields(
+                layout_data,
+                selected_inputs,
+                "in",
+            )
+        else:
+            input_flat = _flatten_numeric_sections(layout_data)
 
     q3d_elements = parse_full_maxwell_elements(q3d_path)
 
@@ -245,32 +336,45 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
             with open(lom_path, "r", encoding="utf-8") as file:
                 lom_data = json.load(file)
 
-            qubit_params = lom_data.get("qubits_parameters", {})
-            coupling_params = lom_data.get("coupling_parameters_MHz", {})
+            if selected_outputs:
+                lom_flat = _extract_selected_fields(
+                    lom_data,
+                    selected_outputs,
+                    "out",
+                )
+            else:
+                qubit_params = lom_data.get("qubits_parameters", {})
+                coupling_params = lom_data.get("coupling_parameters_MHz", {})
 
-            for mode_name in ["Qubit_1", "Coupler", "Qubit_2"]:
-                mode_data = qubit_params.get(mode_name)
-                if isinstance(mode_data, dict):
-                    lom_flat[f"lom_{mode_name}_C_eff"] = mode_data.get("C_eff_fF")
-                    lom_flat[f"lom_{mode_name}_Ec"] = mode_data.get("Ec_MHz")
-                    lom_flat[f"lom_{mode_name}_Ej"] = mode_data.get("Ej_GHz")
-                    lom_flat[f"lom_{mode_name}_Ej_Ec_ratio"] = mode_data.get(
-                        "Ej_Ec_ratio"
-                    )
+                for mode_name in ["Qubit_1", "Coupler", "Qubit_2"]:
+                    mode_data = qubit_params.get(mode_name)
+                    if isinstance(mode_data, dict):
+                        lom_flat[f"lom_{mode_name}_C_eff"] = mode_data.get(
+                            "C_eff_fF"
+                        )
+                        lom_flat[f"lom_{mode_name}_Ec"] = mode_data.get("Ec_MHz")
+                        lom_flat[f"lom_{mode_name}_Ej"] = mode_data.get("Ej_GHz")
+                        lom_flat[f"lom_{mode_name}_Ej_Ec_ratio"] = mode_data.get(
+                            "Ej_Ec_ratio"
+                        )
 
-            lom_flat["lom_g12"] = coupling_params.get("g_12")
-            lom_flat["lom_g1c"] = coupling_params.get("g_1c")
-            lom_flat["lom_g2c"] = coupling_params.get("g_2c")
+                lom_flat["lom_g12"] = coupling_params.get("g_12")
+                lom_flat["lom_g1c"] = coupling_params.get("g_1c")
+                lom_flat["lom_g2c"] = coupling_params.get("g_2c")
         except Exception as exc:
             print(f"⚠️ 讀取 LOM 結果失敗：{exc}")
 
-    # spec_checker 尚未修改時檔案可能不存在；存在時不論 pass/fail 都保存。
     spec_flat: Dict[str, Any] = {}
     if os.path.exists(spec_path):
         try:
             with open(spec_path, "r", encoding="utf-8") as file:
                 spec_data = json.load(file)
-            spec_flat = {f"spec_{key}": value for key, value in spec_data.items()}
+            spec_flat = {
+                f"spec_{key}": value
+                for key, value in spec_data.items()
+                if key != "spec_pass"
+            }
+            spec_flat["spec_pass"] = int(spec_data.get("spec_pass", 0))
         except Exception as exc:
             print(f"⚠️ 讀取 Spec 結果失敗：{exc}")
 
@@ -282,16 +386,13 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
     master_row.update(spec_flat)
     master_row.pop("sample_dir", None)
 
-    # SQLite 不接受 dict/list 作為欄位值，統一轉成 JSON。
     for key, value in list(master_row.items()):
         if isinstance(value, (dict, list, tuple)):
             master_row[key] = json.dumps(value, ensure_ascii=False)
         elif isinstance(value, bool):
             master_row[key] = int(value)
 
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(module_dir, "quantum_simulation_surrogate.db")
-    table_name = "simulation_records"
+    db_path = os.path.join(module_dir, db_name)
 
     conn = sqlite3.connect(db_path)
     try:
@@ -340,16 +441,18 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
         conn.commit()
 
         print(
-            "💾 樣本已寫入代理模型資料庫："
-            f"{trace_record.get('sample_id')} | "
-            f"Q3D矩陣完整={q3d_elements['q3d_matrix_complete']}"
+            "💾 樣本已成功寫入資料庫：\n"
+            f"   - 資料庫路徑: {db_path}\n"
+            f"   - 資料表: {table_name}\n"
+            f"   - Sample ID: {trace_record.get('sample_id')}\n"
+            f"   - Q3D矩陣完整: {q3d_elements['q3d_matrix_complete']}"
         )
         return True
 
     except sqlite3.IntegrityError as exc:
         conn.rollback()
         raise RuntimeError(
-            "資料庫已存在相同 sample_id，為避免覆蓋舊資料已拒絕寫入："
+            "資料庫已存在相同 sample_id，已拒絕寫入："
             f"{trace_record.get('sample_id')}"
         ) from exc
     except Exception:
@@ -358,43 +461,23 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
     finally:
         conn.close()
 
-def parse_capacitance_matrix(capacitance_data):
-    entries = []
-    matrix_data = capacitance_data.get("matrix_data")
-    if not isinstance(matrix_data, dict) or not matrix_data:
-        raise ValueError("capacitance_matrix_results.json 缺少 matrix_data")
-
-    for key, info in matrix_data.items():
-        match = CAPACITANCE_KEY_PATTERN.fullmatch(key.replace(" ", ""))
-        if not match:
-            raise ValueError(f"無法解析電容矩陣鍵值: {key}")
-            
-        row_node = match.group(1)
-        column_node = match.group(2)
-        
-        # 🌟 新增：解析節點名稱開頭的數字索引 (例如從 "0_qubit1..." 抽出 0)
-        try:
-            row_idx = int(row_node.split('_')[0])
-            col_idx = int(column_node.split('_')[0])
-        except ValueError:
-            # 防呆：如果未來節點命名沒有數字前綴，則退化為字母順序比較
-            row_idx, col_idx = row_node, column_node
-
-        # 🌟 核心過濾器：只保留上三角矩陣與對角線 (Row <= Column)
-        if row_idx <= col_idx:
-            if not isinstance(info, dict) or "value" not in info:
-                raise ValueError(f"電容矩陣元素缺少 value: {key}")
-            
-            entries.append(
-                (
-                    row_node,
-                    column_node,
-                    float(info["value"]),
-                    str(info.get("unit", "")),
-                )
-            )
-            
-    return entries
 
 if __name__ == "__main__":
-    print("此檔案由 main_pipeline.py 呼叫，不建議單獨執行。")
+    current_dir = os.getcwd()
+    trace_record = {
+        "sample_id": f"LHS_{int(time.time())}_{uuid.uuid4().hex[:6]}",
+        "sample_dir": current_dir,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "run_name": "Auto_Pipeline_Run",
+        "spec_pass": 0,
+        "failure_stage": None,
+        "failure_reason": None,
+    }
+
+    try:
+        success = archive_sample_folder(trace_record)
+        if not success:
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ 資料庫歸檔失敗: {e}")
+        sys.exit(1)

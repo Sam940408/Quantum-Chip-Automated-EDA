@@ -38,7 +38,7 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "slit_width": 10.0,          # 兩個半邊之間的縫隙寬度
             "cut_angle": 90,           # 0: 水平切割, 90: 垂直切割, 可輸入任意角度
             "q_c_dis": 70,
-            #"q_re_dis": 30,            # 沒用
+            "q_re_dis": 30,            # 沒用
 
             # --- 預留給電容矩陣萃取結果的欄位 (單位: GHz) ---
             "ec1_ghz": 0.25,  # 預設給個合理值測試用 (對應 250 MHz)

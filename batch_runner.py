@@ -39,6 +39,19 @@ PARAM_LIMITS = {
     }
 }
 
+OUTPUT_FILES = [
+    "quantum_chip_final.gds",
+    "quantum_chip_final.dxf",
+    "capacitance_matrix_results.json",
+    "lom_results.json",
+    "spec_results.json",
+]
+
+def clear_previous_outputs():
+    for filepath in OUTPUT_FILES:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
 def get_pruned_limits(base_json_data):
     """根據當前的形狀開關，修剪 PARAM_LIMITS，並過濾掉 min >= max 的無效區間"""
     current_limits = copy.deepcopy(PARAM_LIMITS)
@@ -147,6 +160,8 @@ def run_batch(max_iterations=10000):
     
     # 4. 開始執行迴圈
     for i in range(max_iterations):
+        clear_previous_outputs()
+        
         print(f"\n{'='*80}")
         print(f"▶️ 開始執行第 {i+1}/{max_iterations} 次迭代")
         print(f"{'='*80}")
