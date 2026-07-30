@@ -11,6 +11,10 @@
 * **物理規格過濾:** 自動計算有效耦合強度 ($g_{\text{eff}}$) 並驗證關閉點 (Zero-crossing) 與失諧限制。
 * **智慧歸檔系統:** SQLite 資料庫自動記錄幾何參數、完整 7x7 電容矩陣元素與 LOM 特徵，打造完美 Data Flywheel。
 
+## 🏗️ 系統工作流架構 (System Architecture)
+* 參考附件pdf檔案
+
+
 ## 🚀 工作流架構 (Pipeline)
 1. `batch_runner.py` / `main_pipeline.py` (中央調度與 LHS 採樣)
 2. `drc_checker.py` (幾何防呆)
@@ -32,17 +36,12 @@ py -m pip install scipy
 
 
 ---
+首次使用這台電腦的基礎設定
+# 設定您的使用者名稱 (英文)
+git config --global user.name "Your Name"
 
-### 第二步：在 GitHub 建立新專案
-1. 登入您的 [GitHub](https://github.com/) 帳號。
-2. 點擊右上角的 **「+」**，選擇 **「New repository」**。
-3. 填寫專案名稱（例如：`Quantum-Chip-Automated-EDA`）。
-4. 設定為 Public 或 Private。
-5. **注意：** 不要勾選 "Add a README" 或 "Add .gitignore"（因為我們剛剛已經在本地建好了）。
-6. 點擊 **「Create repository」**。
-
----
-
+# 設定您的電子信箱 (與 GitHub 帳號相同)
+git config --global user.email "your.email@example.com"
 
 ---
 更新上傳步驟
@@ -53,5 +52,20 @@ git commit -m "Update: 更新模擬檔案"
 git push origin main
 
 複製貼上就可上傳
+
 ---
-git commit -m "Update: 更新XX檔案"這裡記得說做了甚麼改動
+刪除檔案
+# 1. 從 Git 追蹤名單中移除檔案 (保留本機檔案)
+git rm --cached 檔案名稱
+# 若要移除整個資料夾，請加 -r，例如：git rm -r --cached 資料夾名稱
+
+# 2. 提交這個「移除」的動作
+git commit -m "Fix: 從追蹤清單移除不該上傳的檔案"
+
+# 3. 推送到 GitHub
+git push origin main
+---
+把 GitHub 上的最新進度抓回本機
+git pull origin main
+
+

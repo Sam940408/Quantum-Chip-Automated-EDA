@@ -78,7 +78,19 @@
             "min": 50.0,
             "max": 500.0
         },
+        "arm_width": {
+            "min": 5.0,
+            "max": 100.0
+        },
+        "head1_length": {
+            "min": 10.0,
+            "max": 200.0
+        },
         "head1_width": {
+            "min": 10.0,
+            "max": 200.0
+        },
+        "head2_length": {
             "min": 10.0,
             "max": 200.0
         },
@@ -93,14 +105,8 @@
         "center_dis": {
             "min": 25.0,
             "max": 35.0
-        },
-        "round_radius": {
-            "min": 10,
-            "max": 10.0
         }
     },
-    "feedline": {},
-    "global": {},
     "lom_settings": {
         "frequencies": {
             "w1": {

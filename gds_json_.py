@@ -38,7 +38,7 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "slit_width": 10.0,          # 兩個半邊之間的縫隙寬度
             "cut_angle": 90,           # 0: 水平切割, 90: 垂直切割, 可輸入任意角度
             "q_c_dis": 70,
-            "q_re_dis": 30,            # 沒用
+            #"q_re_dis": 30,            # 沒用
 
             # --- 預留給電容矩陣萃取結果的欄位 (單位: GHz) ---
             "ec1_ghz": 0.25,  # 預設給個合理值測試用 (對應 250 MHz)
@@ -81,32 +81,11 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "round_radius": 10      # 圓角半徑
         },
 
-        # 共振腔參數 (U型 + 蛇形彎折)
+        # 共振腔參數
         "resonator": {
-            "u_length_right": 600,
-            "u_length_up": 370,
-            "u_length_right2": 75,
-            "u_width": 10,
-            "arc_width": 50,
-            "arc_start_angle": -80,
-            "arc_stop_angle": 80,
-            "trace_width": 10,
-            "pitch": 60,
-            "straight_len": 300,
-            "turns": 3,
-            "round_radius": 10
         },
-
         # 饋線參數 (Feedline)
         "feedline": {
-            "start_shift_y": 400,
-            "width": 10,
-            "len_l1": 1000,
-            "len_u2": 170,
-            "len_r3": 2300,
-            "len_d4": 170,
-            "len_r5": 1675,
-            "round_radius": 30
         },
         
         # 圖層設定
@@ -124,8 +103,7 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "project_name": "Floating_Qubit_Project",
             "design_name": "Q3D_Extraction",
             "setup_name": "Setup_5GHz",
-            "aedt_version": "2021.2",
-            "non_graphical": False#先使用 False，因為第一次需要看 AEDT 是否正確匯入 GDS、辨識七個導體與執行 Setup。單筆成功後，再改成：True
+            "aedt_version": "2021.2"
         },
         
         "simulation": {
@@ -151,15 +129,15 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
                 "Z0": 50
             },
             "frequencies": {
-                "w1": 6.6,
-                "w2": 6.7,
+                "w1": 5.6,
+                "w2": 5.7,
                 "wc": 4.0
             },
             "isSymmetric": 1,
             "sweep_settings": {
                 "wc_lower_start": 4,
-                "wc_lower_stop": 6,
-                "wc_upper_start": 6,
+                "wc_lower_stop": 5.6,
+                "wc_upper_start": 5.7,
                 "wc_upper_stop": 8,
                 "num_points": 10000
             }

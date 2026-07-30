@@ -1,317 +1,189 @@
-import copy
 import json
-import os
-import re
-import sqlite3
-import sys
+import random
+import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple
-
+import os
+import sys
+import copy
+import numpy as np
 from scipy.stats import qmc
 
+# 載入你原本的腳本作為模組 (用來生成基礎範本)
 try:
     import gds_json_
-    import main_pipeline
-except ImportError as exc:
-    print(
-        "❌ 找不到 gds_json_.py 或 main_pipeline.py，"
-        "請確認它們與 batch_runner.py 位於同一資料夾。"
-    )
-    raise SystemExit(1) from exc
+except ImportError:
+    print("❌ 錯誤：找不到 gds_json_.py，請確認它與 batch_runner.py 在同一資料夾。")
+    sys.exit(1)
 
-
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-TARGET_JSON_FILE = os.path.join(ROOT_DIR, "layout_parameters.json")
-RUNS_DIR = os.path.join(ROOT_DIR, "runs")
-SURROGATE_DB = os.path.join(ROOT_DIR, "quantum_simulation_surrogate.db")
-SAMPLE_ID_PATTERN = re.compile(r"^sample_(\d+)$")
+TARGET_JSON_FILE = "layout_parameters.json"
 
 # =========================================================================
-# 參數範圍限制設定
+# 🎛️ 參數範圍限制設定 (支援無限層級巢狀結構)
 # =========================================================================
 PARAM_LIMITS = {
     "qubit": {
         "gap_size": {"min": 30.0, "max": 50.0},
-        "radius": {"min": 50.0, "max": 500.0},
-        "slit_width": {"min": 50.0, "max": 70.0},
-        "rect_length": {"min": 50.0, "max": 1000.0},
-        "rect_width": {"min": 50.0, "max": 1000.0},
+        "slit_width": {"min": 50.0, "max": 70.0},  # 極板間距 (Gap)
+        "rect_length": {"min": 50.0, "max": 1000.0}, # 配合極板總面積 (Pad Area)
+        "rect_width": {"min": 50.0, "max": 1000.0},  # 配合極板總面積 (Pad Area)
         "q_c_dis": {"min": 70.0, "max": 120.0},
-    },
-    "coupler": {
-        "arc_width": {"min": 10.0, "max": 100.0},
-        "gap_size": {"min": 30.0, "max": 50.0},
-        "center_dis": {"min": 5.0, "max": 15.0},
-        "length": {"min": 50.0, "max": 1000.0},
-        "round_radius": {"min": 0.0, "max": 20.0},
-    },
-    "t_coupler": {
-        "arm_length": {"min": 50.0, "max": 500.0},
-        "arm_width": {"min": 5.0, "max": 100.0},
-        "head_width": {"min": 10.0, "max": 200.0},
-        "gap_size": {"min": 30.0, "max": 50.0},
-        "center_dis": {"min": 5.0, "max": 15.0},
-        "round_radius": {"min": 0.0, "max": 20.0},
     },
     "h_coupler": {
         "arm_length": {"min": 50.0, "max": 500.0},
         "head1_width": {"min": 10.0, "max": 200.0},
         "head2_width": {"min": 10.0, "max": 200.0},
+        "head1_length": {"min": 10.0, "max": 200.0},
+        "head2_length": {"min": 10.0, "max": 200.0},
         "gap_size": {"min": 30.0, "max": 50.0},
         "center_dis": {"min": 25.0, "max": 35.0},
-        # min == max 代表固定參數，不參與 LHS。
-        "round_radius": {"min": 10.0, "max": 10.0},
-    },
+    }
 }
 
-
-def get_pruned_limits(base_json_data: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
-    """依目前 qubit/coupler 形狀修剪參數空間。"""
+def get_pruned_limits(base_json_data):
+    """根據當前的形狀開關，修剪 PARAM_LIMITS，並過濾掉 min >= max 的無效區間"""
     current_limits = copy.deepcopy(PARAM_LIMITS)
     toggles = base_json_data.get("toggles", {})
-    qubit_type = toggles.get("qubit_type", "rect")
-    coupler_type = toggles.get("coupler_type", "arc")
+    q_type = toggles.get("qubit_type", "rect")
+    c_type = toggles.get("coupler_type", "arc")
 
+    # 針對 Qubit 形狀修剪
     if "qubit" in current_limits:
-        if qubit_type == "rect":
+        if q_type == "rect":
             current_limits["qubit"].pop("radius", None)
-        elif qubit_type == "circle":
+        elif q_type == "circle":
             current_limits["qubit"].pop("rect_length", None)
             current_limits["qubit"].pop("rect_width", None)
 
-    if coupler_type == "arc":
+    # 針對 Coupler 形狀修剪
+    if c_type == "arc":
         current_limits.pop("t_coupler", None)
         current_limits.pop("h_coupler", None)
-    elif coupler_type == "t_shape":
+    elif c_type == "t_shape":
         current_limits.pop("coupler", None)
         current_limits.pop("h_coupler", None)
-    elif coupler_type == "h_shape":
+    elif c_type == "h_shape":
         current_limits.pop("coupler", None)
         current_limits.pop("t_coupler", None)
-    else:
-        raise ValueError(f"不支援的 coupler_type：{coupler_type}")
 
-    flat_limits: Dict[str, Dict[str, float]] = {}
-
-    def flatten(data: Dict[str, Any], prefix: str = "") -> None:
-        for key, value in data.items():
-            full_key = f"{prefix}{key}"
-            if isinstance(value, dict) and {"min", "max"}.issubset(value):
-                minimum = float(value["min"])
-                maximum = float(value["max"])
-                if minimum < maximum:
-                    flat_limits[full_key] = value
+    # 將巢狀字典平坦化，並加入 min < max 的防呆檢查
+    flat_limits = {}
+    def flatten(d, prefix=""):
+        for k, v in d.items():
+            if isinstance(v, dict) and "min" in v and "max" in v:
+                # 🌟 新增防呆：只有當 min 真的小於 max 時，才加入 LHS 抽樣
+                if float(v["min"]) < float(v["max"]):
+                    flat_limits[prefix + k] = v
                 else:
-                    print(
-                        f"⚠️ [{full_key}] min={minimum} >= max={maximum}，"
-                        "視為固定值，不加入 LHS。"
-                    )
-            elif isinstance(value, dict):
-                flatten(value, prefix=f"{full_key}.")
-
+                    print(f"⚠️ 提示：[{prefix + k}] 的 min ({v['min']}) >= max ({v['max']})，已改為固定值，不參與 LHS 抽樣。")
+            elif isinstance(v, dict):
+                flatten(v, prefix + k + ".")
+                
     flatten(current_limits)
     return flat_limits
 
-
-def generate_lhs_samples(
-    num_samples: int,
-    flat_limits: Dict[str, Dict[str, float]],
-    seed: Optional[int] = None,
-) -> Tuple[List[str], Any]:
-    """建立可重現的 Latin Hypercube 樣本。"""
-    dimension = len(flat_limits)
-    if dimension == 0:
+def generate_lhs_samples(num_samples, flat_limits):
+    """生成 LHS 樣本矩陣並縮放至參數上下限"""
+    d = len(flat_limits)
+    if d == 0:
         return [], []
-
-    sampler = qmc.LatinHypercube(d=dimension, seed=seed)
-    unit_samples = sampler.random(n=num_samples)
+        
+    # 建立拉丁超立方採樣器
+    sampler = qmc.LatinHypercube(d=d)
+    # 生成 [0, 1] 之間的分佈矩陣
+    sample_matrix = sampler.random(n=num_samples) 
 
     keys = list(flat_limits.keys())
-    lower_bounds = [float(flat_limits[key]["min"]) for key in keys]
-    upper_bounds = [float(flat_limits[key]["max"]) for key in keys]
-    scaled_samples = qmc.scale(unit_samples, lower_bounds, upper_bounds)
+    l_bounds = [flat_limits[k]["min"] for k in keys]
+    u_bounds = [flat_limits[k]["max"] for k in keys]
+
+    # 將 [0,1] 縮放到你定義的 [min, max]
+    scaled_samples = qmc.scale(sample_matrix, l_bounds, u_bounds)
     return keys, scaled_samples
 
-
-def apply_single_lhs_sample(
-    target_dict: Dict[str, Any],
-    keys: List[str],
-    sample_row: Any,
-    flat_limits: Dict[str, Dict[str, float]],
-) -> Dict[str, Any]:
-    """將一列 LHS 數值注入巢狀 layout JSON。"""
-    updated_records: Dict[str, Any] = {}
-
-    for index, key_path in enumerate(keys):
-        value = sample_row[index]
+def apply_single_lhs_sample(target_dict, keys, sample_row, flat_limits):
+    """將單列 LHS 數據精準注入到 JSON 巢狀結構中"""
+    updated_records = {}
+    for i, key_path in enumerate(keys):
+        val = sample_row[i]
+        
+        # 處理資料型態 (整數或浮點數)
         if flat_limits[key_path].get("type") == "int":
-            value = int(round(value))
+            val = int(round(val))
         else:
-            value = round(float(value), 3)
+            val = round(val, 3)
 
-        path_parts = key_path.split(".")
+        # 沿著路徑 (如 qubit -> gap_size) 將數值寫入 target_dict
+        keys_split = key_path.split('.')
         current = target_dict
-        for path_part in path_parts[:-1]:
-            current = current.setdefault(path_part, {})
-        current[path_parts[-1]] = value
-        updated_records[key_path] = value
+        for k in keys_split[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+        current[keys_split[-1]] = val
+        updated_records[key_path] = val
 
     return updated_records
 
-
-def find_next_sample_index() -> int:
-    """
-    同時掃描 runs 資料夾與 SQLite，找出下一個可用的流水號。
-
-    即使使用者刪除了 runs 資料夾但保留資料庫，也不會重用舊 sample_id。
-    """
-    used_indices = set()
-
-    if os.path.isdir(RUNS_DIR):
-        for name in os.listdir(RUNS_DIR):
-            match = SAMPLE_ID_PATTERN.fullmatch(name)
-            if match:
-                used_indices.add(int(match.group(1)))
-
-    if os.path.exists(SURROGATE_DB):
-        try:
-            connection = sqlite3.connect(SURROGATE_DB)
-            try:
-                cursor = connection.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name='simulation_records'"
-                )
-                if cursor.fetchone():
-                    cursor.execute("SELECT sample_id FROM simulation_records")
-                    for (sample_id,) in cursor.fetchall():
-                        match = SAMPLE_ID_PATTERN.fullmatch(str(sample_id))
-                        if match:
-                            used_indices.add(int(match.group(1)))
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            print(f"⚠️ 無法掃描既有代理模型資料庫：{exc}")
-
-    return max(used_indices, default=0) + 1
-
-
-def run_batch(
-    max_iterations: int = 10_000,
-    run_name: str = "LHS_Sweep",
-    seed: Optional[int] = 940408,
-    failure_pause_seconds: float = 2.0,
-) -> None:
-    """執行 LHS 批次探索，每一筆都使用唯一 sample_id。"""
-    if max_iterations <= 0:
-        raise ValueError("max_iterations 必須大於 0。")
-
-    os.chdir(ROOT_DIR)
-
-    print(
-        f"🔄 啟動 LHS 參數空間探索，預計執行 {max_iterations} 筆；"
-        f"seed={seed}"
-    )
-
+def run_batch(max_iterations=10000):
+    """執行批次自動化迴圈 (LHS 版本)"""
+    print(f"🔄 啟動 LHS 拉丁超立方參數空間探索，預計執行 {max_iterations} 次迴圈...")
+    print(f"⚠️ 請確認主程式 (main_pipeline.py) 的 'gds_json' 開關已設為 False！\n")
+    
+    # 1. 產生基礎 JSON 以便獲取當前形狀結構
     gds_json_.generate_layout_json(TARGET_JSON_FILE, print_content=False)
-    with open(TARGET_JSON_FILE, "r", encoding="utf-8") as file:
-        base_config = json.load(file)
+    with open(TARGET_JSON_FILE, "r", encoding="utf-8") as f:
+        base_config = json.load(f)
 
+    # 2. 獲取修剪後的有效參數與邊界
     flat_limits = get_pruned_limits(base_config)
-    keys, lhs_matrix = generate_lhs_samples(
-        max_iterations,
-        flat_limits,
-        seed=seed,
-    )
-
-    if not keys:
-        print("❌ 找不到有效參數範圍，請檢查 PARAM_LIMITS。")
+    
+    # 3. 🎯 核心：一次性生成所有 LHS 樣本
+    keys, lhs_matrix = generate_lhs_samples(max_iterations, flat_limits)
+    if len(keys) == 0:
+        print("❌ 錯誤：找不到任何有效的參數範圍限制。請檢查 PARAM_LIMITS。")
         return
+        
+    print(f"📐 成功生成 LHS 樣本矩陣！維度: {lhs_matrix.shape} (變數數量: {len(keys)})")
+    
+    # 4. 開始執行迴圈
+    for i in range(max_iterations):
+        print(f"\n{'='*80}")
+        print(f"▶️ 開始執行第 {i+1}/{max_iterations} 次迭代")
+        print(f"{'='*80}")
+        
+        # 【重要防呆】每次迴圈都重新生成乾淨的預設 JSON，避免上一次的殘留參數干擾
+        gds_json_.generate_layout_json(TARGET_JSON_FILE, print_content=False)
+        with open(TARGET_JSON_FILE, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
 
-    first_sample_index = find_next_sample_index()
-    print(
-        f"📐 LHS矩陣維度：{lhs_matrix.shape}；"
-        f"第一筆 ID：sample_{first_sample_index:06d}"
-    )
+        # 注入第 i 列的 LHS 數值
+        updated_params = apply_single_lhs_sample(config_data, keys, lhs_matrix[i], flat_limits)
+        
+        print(f"🎲 本次注入 LHS 參數:")
+        for k, v in updated_params.items():
+            print(f"   - {k}: {v}")
 
-    success_count = 0
-    failure_count = 0
-
-    try:
-        for local_index in range(max_iterations):
-            sample_number = first_sample_index + local_index
-            sample_id = f"sample_{sample_number:06d}"
-
-            print("\n" + "=" * 80)
-            print(
-                f"▶️ 第 {local_index + 1}/{max_iterations} 筆 | "
-                f"{sample_id}"
+        # 將更新後的內容寫回 JSON 檔案
+        with open(TARGET_JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=4, ensure_ascii=False)
+        
+        # 呼叫主流程 main_pipeline.py
+        start_time = time.time()
+        try:
+            subprocess.run(
+                [sys.executable, "main_pipeline.py"], 
+                check=True,
+                capture_output=False 
             )
-            print("=" * 80)
-
-            # 每次都重新生成乾淨的預設 JSON，避免上一筆參數殘留。
-            gds_json_.generate_layout_json(TARGET_JSON_FILE, print_content=False)
-            with open(TARGET_JSON_FILE, "r", encoding="utf-8") as file:
-                config_data = json.load(file)
-
-            updated_parameters = apply_single_lhs_sample(
-                config_data,
-                keys,
-                lhs_matrix[local_index],
-                flat_limits,
-            )
-
-            print("🎲 本次注入參數：")
-            for key, value in updated_parameters.items():
-                print(f"   - {key}: {value}")
-
-            with open(TARGET_JSON_FILE, "w", encoding="utf-8") as file:
-                json.dump(config_data, file, indent=4, ensure_ascii=False)
-
-            start_time = time.time()
-            try:
-                trace = main_pipeline.main_pipeline_entry(
-                    sample_id=sample_id,
-                    run_name=run_name,
-                )
-            except FileExistsError as exc:
-                # 正常情況不應發生；發生時停止，避免流水號邏輯失控。
-                print(f"❌ {exc}")
-                raise RuntimeError(
-                    "偵測到 sample_id 衝突，批次已停止以避免覆蓋資料。"
-                ) from exc
-
             elapsed = time.time() - start_time
-
-            if trace is None:
-                failure_count += 1
-                print(f"❌ {sample_id} 無法啟動流水線。耗時 {elapsed:.2f} 秒")
-            elif trace["failure_stage"] == "None":
-                success_count += 1
-                print(f"✅ {sample_id} 全流程完成。耗時 {elapsed:.2f} 秒")
-            else:
-                failure_count += 1
-                print(
-                    f"⚠️ {sample_id} 失敗於 {trace['failure_stage']}："
-                    f"{trace['failure_reason']}"
-                )
-                print(f"   該失敗樣本仍已嘗試歸檔。耗時 {elapsed:.2f} 秒")
-                if failure_pause_seconds > 0:
-                    time.sleep(failure_pause_seconds)
-
-    except KeyboardInterrupt:
-        print("\n🛑 使用者中止批次。已完成的樣本不會被刪除。")
-
-    finally:
-        completed = success_count + failure_count
-        print("\n" + "=" * 80)
-        print("📊 批次執行摘要")
-        print(f"   已處理：{completed}/{max_iterations}")
-        print(f"   全流程通過：{success_count}")
-        print(f"   中途失敗但已歸檔：{failure_count}")
-        print("=" * 80)
-
+            print(f"\n✅ 第 {i+1} 次迭代成功完成！耗時: {elapsed:.2f} 秒")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"\n❌ 第 {i+1} 次迭代被 DRC 或模擬錯誤攔截 (返回碼 {e.returncode})。")
+            print("⚠️ 系統將暫停 2 秒後產生下一組全新參數...")
+            time.sleep(2)
+            continue 
 
 if __name__ == "__main__":
-    # 先用 2 筆做小型驗證；確認資料夾與 SQLite 正常後再改成 5000。
-    run_batch(max_iterations=2, run_name="LHS_Sweep_Test", seed=940408)
+    # 這裡已經幫你設定為 10000 筆了，隨時可以起跑！
+    run_batch(max_iterations=2)

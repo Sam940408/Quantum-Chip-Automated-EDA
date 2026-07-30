@@ -3,23 +3,22 @@ import os
 
 def generate_constraints_json(filename='constraints.json'):
     """
-    像 gds_json_.py 一樣，生成一份預設的約束條件字典並存檔。
+    生成一份預設的約束條件字典並存檔。
     如果未來有新的參數需要限制，直接在這個字典裡面擴充即可。
     """
     constraints_data = {
         "qubit": {
-                "gap_size": {"min": 30.0, "max": 50.0},
-                "radius": {"min": 50.0, "max": 500.0},     # 配合極板總面積 (Pad Area)
-                "slit_width": {"min": 50.0, "max": 70.0},  # 極板間距 (Gap)
-                "rect_length": {"min": 50.0, "max": 1000.0}, # 配合極板總面積 (Pad Area)
-                "rect_width": {"min": 50.0, "max": 1000.0},  # 配合極板總面積 (Pad Area)
-                "q_c_dis": {"min": 70.0, "max": 120.0},
-                #"q_re_dis": {"min": 10.0, "max": 30.0}       # 還沒使用
-            },
+            "gap_size": {"min": 30.0, "max": 50.0},
+            "radius": {"min": 50.0, "max": 500.0},     
+            "slit_width": {"min": 50.0, "max": 70.0},  
+            "rect_length": {"min": 50.0, "max": 1000.0}, 
+            "rect_width": {"min": 50.0, "max": 1000.0},  
+            "q_c_dis": {"min": 70.0, "max": 120.0},
+        },
         "coupler": {
             "arc_width": {"min": 10.0, "max": 100.0},
             "gap_size": {"min": 30.0, "max": 50.0},
-            "center_dis": {"min": 5.0, "max": 15.0},     # 極板間距 (Gap)
+            "center_dis": {"min": 5.0, "max": 15.0},     
             "length": {"min": 50.0, "max": 1000.0},
             "round_radius": {"min": 0, "max": 20.0}
         },
@@ -33,18 +32,14 @@ def generate_constraints_json(filename='constraints.json'):
         },
         "h_coupler": {
             "arm_length": {"min": 50.0, "max": 500.0},
+            "arm_width": {"min": 5.0, "max": 100.0},        
+            "head1_length": {"min": 10.0, "max": 200.0},    
             "head1_width": {"min": 10.0, "max": 200.0},
+            "head2_length": {"min": 10.0, "max": 200.0},    
             "head2_width": {"min": 10.0, "max": 200.0},
             "gap_size": {"min": 30.0, "max": 50.0},
             "center_dis": {"min": 25.0, "max": 35.0},
-            "round_radius": {"min": 10, "max": 10.0}
-        },
-        "feedline": {
-            #"width": {"min": 2.0, "max": 50.0}
-        },
-        "global": {
-            #"gnd_length": {"min": 2000.0, "max": 15000.0},
-            #"gnd_width": {"min": 2000.0, "max": 15000.0}
+            #"round_radius": {"min": 10, "max": 10.0}
         },
         "lom_settings": {
             "frequencies": {
@@ -53,12 +48,11 @@ def generate_constraints_json(filename='constraints.json'):
             }
         },
         "Qubit_pra": {
-            "thin_cond_thickness_nm": {"min": 50, "max": 200}# 厚度，單位 nm
+            "thin_cond_thickness_nm": {"min": 50, "max": 200} 
         },
-        
         "substrate": {
-            "thickness": {"min": 500, "max": 500.0}  # 基板厚度，單位 um
-        },
+            "thickness": {"min": 500, "max": 500.0}  
+        }
     }
     
     try:

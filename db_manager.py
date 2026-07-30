@@ -358,6 +358,43 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
     finally:
         conn.close()
 
+def parse_capacitance_matrix(capacitance_data):
+    entries = []
+    matrix_data = capacitance_data.get("matrix_data")
+    if not isinstance(matrix_data, dict) or not matrix_data:
+        raise ValueError("capacitance_matrix_results.json 缺少 matrix_data")
+
+    for key, info in matrix_data.items():
+        match = CAPACITANCE_KEY_PATTERN.fullmatch(key.replace(" ", ""))
+        if not match:
+            raise ValueError(f"無法解析電容矩陣鍵值: {key}")
+            
+        row_node = match.group(1)
+        column_node = match.group(2)
+        
+        # 🌟 新增：解析節點名稱開頭的數字索引 (例如從 "0_qubit1..." 抽出 0)
+        try:
+            row_idx = int(row_node.split('_')[0])
+            col_idx = int(column_node.split('_')[0])
+        except ValueError:
+            # 防呆：如果未來節點命名沒有數字前綴，則退化為字母順序比較
+            row_idx, col_idx = row_node, column_node
+
+        # 🌟 核心過濾器：只保留上三角矩陣與對角線 (Row <= Column)
+        if row_idx <= col_idx:
+            if not isinstance(info, dict) or "value" not in info:
+                raise ValueError(f"電容矩陣元素缺少 value: {key}")
+            
+            entries.append(
+                (
+                    row_node,
+                    column_node,
+                    float(info["value"]),
+                    str(info.get("unit", "")),
+                )
+            )
+            
+    return entries
 
 if __name__ == "__main__":
     print("此檔案由 main_pipeline.py 呼叫，不建議單獨執行。")
