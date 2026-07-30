@@ -51,3 +51,7 @@ git status
 git add .
 git commit -m "Update: 更新模擬檔案"
 git push origin main
+
+複製貼上就可上傳
+---
+git commit -m "Update: 更新XX檔案"這裡記得說做了甚麼改動
