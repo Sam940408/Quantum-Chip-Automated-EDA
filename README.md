@@ -20,8 +20,10 @@
 6. `spec_checker.py` (物理指標審查)
 7. `db_manager.py` (SQLite 特徵歸檔)
 
-## 🛠️ 依賴套件 (Dependencies)
+## 🛠️ 依賴套件 (Dependencies)複製貼上在您的終端機
+
 ```bash
+必須使用Python 3.10
 py -m pip install pyaedt==0.5.0
 py -m pip install Klayout
 & C:/Users/LAB_PC/AppData/Local/Programs/Python/Python310/python.exe -m pip install --upgrade --force-reinstall clr_loader pythonnet
@@ -41,27 +43,6 @@ py -m pip install scipy
 
 ---
 
-### 第三步：透過終端機 (CMD / Terminal) 推送程式碼
-打開終端機，切換到您存放這些腳本的資料夾（例如 `cd C:\Users\YourName\QuantumProject`），然後依序輸入以下指令：
-
-```bash
-# 1. 初始化 Git 數據庫
-git init
-
-# 2. 將所有檔案加入追蹤 (受 .gitignore 限制的檔案會自動被排除)
-git add .
-
-# 3. 提交第一個版本
-git commit -m "Initial commit: Completed automated EDA pipeline and LOM bridge"
-
-# 4. 建立 main 分支
-git branch -M main
-
-# 5. 連結到您剛剛在 GitHub 建立的遠端數據庫 (請把下方的 URL 換成您 GitHub 專案的網址)
-git remote add origin https://github.com/您的帳號/Quantum-Chip-Automated-EDA.git
-
-# 6. 推送程式碼到 GitHub
-git push -u origin main
 
 ---
 更新上傳步驟
