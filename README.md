@@ -33,7 +33,7 @@ py -m pip install Klayout
 & C:/Users/LAB_PC/AppData/Local/Programs/Python/Python310/python.exe -m pip install --upgrade --force-reinstall clr_loader pythonnet
 py -m pip install --upgrade pythonnet clr-loader
 py -m pip install scipy
-
+winget install --id GitHub.cli --source winget
 
 ---
 首次使用這台電腦的基礎設定

@@ -15,28 +15,86 @@ except ImportError:
     print("❌ 錯誤：找不到 gds_json_.py，請確認它與 batch_runner.py 在同一資料夾。")
     sys.exit(1)
 
+try:
+    from github_db_sync import maybe_sync_database
+except ImportError:
+    maybe_sync_database = None
+
 TARGET_JSON_FILE = "layout_parameters.json"
+GITHUB_SYNC_CONFIG_FILE = "github_sync_config.json"
 
 # =========================================================================
 # 🎛️ 參數範圍限制設定 (支援無限層級巢狀結構)
 # =========================================================================
 PARAM_LIMITS = {
     "qubit": {
-        "gap_size": {"min": 30.0, "max": 50.0},
-        "slit_width": {"min": 50.0, "max": 70.0},  # 極板間距 (Gap)
-        "rect_length": {"min": 50.0, "max": 1000.0}, # 配合極板總面積 (Pad Area)
-        "rect_width": {"min": 50.0, "max": 1000.0},  # 配合極板總面積 (Pad Area)
-        "q_c_dis": {"min": 70.0, "max": 120.0},
+        # Qubit 金屬外圍到 GND 的挖空
+        "gap_size": {
+            "min": 30.0,
+            "max": 80.0,
+        },
+
+        # 兩個 Qubit pad 之間的電容縫隙
+        "slit_width": {
+            "min": 20.0,
+            "max": 150.0,
+        },
+
+        # 虛擬抽樣參數：單側 pad 的 X 方向寬度
+        # 稍後轉換成 geometry.py 使用的 rect_length
+        "pad_width": {
+            "min": 60.0,
+            "max": 200.0,
+        },
+
+        # Pad 的 Y 方向長度
+        "rect_width": {
+            "min": 300.0,
+            "max": 1000.0,
+        },
+
+        # 虛擬抽樣參數：Qubit 與 Coupler 挖空區之間
+        # 保留的 GND 金屬寬度
+        "ground_neck": {
+            "min": 10.0,
+            "max": 40.0,
+        }
     },
+
     "h_coupler": {
-        "arm_length": {"min": 50.0, "max": 500.0},
-        "head1_width": {"min": 10.0, "max": 200.0},
-        "head2_width": {"min": 10.0, "max": 200.0},
-        "head1_length": {"min": 10.0, "max": 200.0},
-        "head2_length": {"min": 10.0, "max": 200.0},
-        "gap_size": {"min": 30.0, "max": 50.0},
-        "center_dis": {"min": 25.0, "max": 35.0},
-    }
+        "arm_width": {
+            "min": 10.0,
+            "max": 40.0,
+        },
+        "arm_length": {
+            "min": 50.0,
+            "max": 500.0,
+        },
+        "head1_width": {
+            "min": 20.0,
+            "max": 100.0,
+        },
+        "head2_width": {
+            "min": 20.0,
+            "max": 100.0,
+        },
+        "head1_length": {
+            "min": 80.0,
+            "max": 250.0,
+        },
+        "head2_length": {
+            "min": 80.0,
+            "max": 250.0,
+        },
+        "gap_size": {
+            "min": 30.0,
+            "max": 80.0,
+        },
+        "center_dis": {
+            "min": 20.0,
+            "max": 60.0,
+        }
+    },
 }
 
 OUTPUT_FILES = [
@@ -52,6 +110,31 @@ def clear_previous_outputs():
         if os.path.exists(filepath):
             os.remove(filepath)
 
+
+def try_github_database_sync(force=False):
+    """同步失敗只告警，不中斷耗時的 Q3D 批次模擬。"""
+    if maybe_sync_database is None:
+        print(
+            "⚠️ 找不到 github_db_sync.py，本輪略過 GitHub 資料庫快照同步。"
+        )
+        return
+
+    result = maybe_sync_database(
+        GITHUB_SYNC_CONFIG_FILE,
+        force=force,
+    )
+    if result.error:
+        print(f"⚠️ {result.reason}")
+        print(f"   原因：{result.error}")
+    elif result.uploaded:
+        print(f"☁️ {result.reason}")
+    else:
+        print(
+            f"ℹ️ GitHub 同步進度：目前資料庫 {result.row_count} 筆，"
+            f"自上次同步後新增 {result.pending_rows} 筆；尚未達上傳門檻。"
+        )
+
+
 def get_pruned_limits(base_json_data):
     """根據當前的形狀開關，修剪 PARAM_LIMITS，並過濾掉 min >= max 的無效區間"""
     current_limits = copy.deepcopy(PARAM_LIMITS)
@@ -64,8 +147,9 @@ def get_pruned_limits(base_json_data):
         if q_type == "rect":
             current_limits["qubit"].pop("radius", None)
         elif q_type == "circle":
-            current_limits["qubit"].pop("rect_length", None)
+            current_limits["qubit"].pop("pad_width", None)
             current_limits["qubit"].pop("rect_width", None)
+            current_limits["qubit"].pop("round_radius", None)
 
     # 針對 Coupler 形狀修剪
     if c_type == "arc":
@@ -137,6 +221,86 @@ def apply_single_lhs_sample(target_dict, keys, sample_row, flat_limits):
 
     return updated_records
 
+#計算相依幾何
+def apply_derived_geometry(target_dict):
+    """
+    將 LHS 的虛擬參數轉換成 geometry.py 真正使用的參數。
+
+    rect_length = 2 * pad_width + slit_width
+    q_c_dis = qubit_gap + coupler_gap + ground_neck
+    """
+    derived_records = {}
+
+    qubit_cfg = target_dict["qubit"]
+
+    # ---------------------------------------------------------
+    # 1. 由單側 pad_width 計算完整 Qubit rect_length
+    # ---------------------------------------------------------
+    pad_width = qubit_cfg.pop("pad_width", None)
+
+    if pad_width is not None:
+        slit_width = float(qubit_cfg["slit_width"])
+
+        rect_length = (
+            2.0 * float(pad_width)
+            + slit_width
+        )
+
+        qubit_cfg["rect_length"] = round(rect_length, 3)
+
+        derived_records["qubit.rect_length"] = (
+            qubit_cfg["rect_length"]
+        )
+
+    # ---------------------------------------------------------
+    # 2. 由 GND neck 計算 q_c_dis
+    # ---------------------------------------------------------
+    ground_neck = float(
+        qubit_cfg.pop("ground_neck")
+    )
+
+    coupler_type = target_dict.get(
+        "toggles",
+        {},
+    ).get("coupler_type", "h_shape")
+
+    coupler_section = {
+        "arc": "coupler",
+        "t_shape": "t_coupler",
+        "h_shape": "h_coupler",
+    }.get(coupler_type)
+
+    if coupler_section is None:
+        raise ValueError(
+            f"不支援的 coupler_type：{coupler_type}"
+        )
+
+    qubit_gap = float(qubit_cfg["gap_size"])
+    coupler_gap = float(
+        target_dict[coupler_section]["gap_size"]
+    )
+
+    q_c_dis = (
+        qubit_gap
+        + coupler_gap
+        + ground_neck
+    )
+
+    qubit_cfg["q_c_dis"] = round(q_c_dis, 3)
+
+    derived_records["qubit.q_c_dis"] = (
+        qubit_cfg["q_c_dis"]
+    )
+    derived_records["derived.ground_neck"] = (
+        ground_neck
+    )
+    derived_records["derived.pad_width"] = (
+        pad_width
+    )
+
+    return derived_records
+
+
 def run_batch(max_iterations=10000):
     """執行批次自動化迴圈 (LHS 版本)"""
     print(f"🔄 啟動 LHS 拉丁超立方參數空間探索，預計執行 {max_iterations} 次迴圈...")
@@ -173,7 +337,10 @@ def run_batch(max_iterations=10000):
 
         # 注入第 i 列的 LHS 數值
         updated_params = apply_single_lhs_sample(config_data, keys, lhs_matrix[i], flat_limits)
-        
+
+        derived_params = apply_derived_geometry(config_data)
+        updated_params.update(derived_params)
+
         print(f"🎲 本次注入 LHS 參數:")
         for k, v in updated_params.items():
             print(f"   - {k}: {v}")
@@ -192,6 +359,10 @@ def run_batch(max_iterations=10000):
             )
             elapsed = time.time() - start_time
             print(f"\n✅ 第 {i+1} 次迭代成功完成！耗時: {elapsed:.2f} 秒")
+
+            # main_pipeline 成功表示 db_manager 已完成本筆資料寫入。
+            # 以資料庫實際列數決定是否累積滿 100 筆，而不是用迴圈次數。
+            try_github_database_sync()
             
         except subprocess.CalledProcessError as e:
             print(f"\n❌ 第 {i+1} 次迭代被 DRC 或模擬錯誤攔截 (返回碼 {e.returncode})。")
@@ -199,6 +370,10 @@ def run_batch(max_iterations=10000):
             time.sleep(2)
             continue 
 
+    # 正常跑完整個批次後，將最後不足 100 筆的尾批也更新到 GitHub。
+    print("\n☁️ 批次執行完成，正在同步最後一份完整資料庫快照...")
+    try_github_database_sync(force=True)
+
 if __name__ == "__main__":
-    # 這裡已經幫你設定為 10000 筆了，隨時可以起跑！
-    run_batch(max_iterations=2)
+    # 執行 50,000 次 LHS 嘗試；實際入庫筆數取決於 DRC 與模擬成功率。
+    run_batch(max_iterations=50000)

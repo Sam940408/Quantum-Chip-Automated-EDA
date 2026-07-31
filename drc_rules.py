@@ -51,18 +51,53 @@ def check_minimum_features(params, manager):
 # ==========================================
 def check_qubit_slit(params, manager):
     errors, warnings = [], []
-    q_type = params.get("toggles", {}).get("qubit_type", "circle")
-    q_slit = params.get("qubit", {}).get("slit_width", 0)
+
+    q_type = params.get(
+        "toggles",
+        {},
+    ).get("qubit_type", "circle")
+
+    q_cfg = params.get("qubit", {})
+    slit_width = float(
+        q_cfg.get("slit_width", 0)
+    )
 
     if q_type == "circle":
-        radius = params.get("qubit", {}).get("radius", 0)
-        if q_slit >= radius * 2:
-            errors.append(f"[幾何錯誤] 圓形 Qubit 的 slit_width ({q_slit}) 大於直徑 ({radius*2})。")
+        radius = float(
+            q_cfg.get("radius", 0)
+        )
+
+        if slit_width >= 2.0 * radius:
+            errors.append(
+                "[幾何錯誤] 圓形 Qubit 的 slit_width "
+                f"({slit_width}) 不得大於或等於直徑 "
+                f"({2.0 * radius})。"
+            )
+
     elif q_type == "rect":
-        width = params.get("qubit", {}).get("rect_width", 0)
-        if q_slit >= width:
-            errors.append(f"[幾何錯誤] 矩形 Qubit 的 slit_width ({q_slit}) 大於寬度 ({width})。")
-            
+        rect_length = float(
+            q_cfg.get("rect_length", 0)
+        )
+        rect_width = float(
+            q_cfg.get("rect_width", 0)
+        )
+        cut_angle = math.radians(
+            float(q_cfg.get("cut_angle", 90))
+        )
+
+        # 矩形沿 slit 法向方向的投影尺寸
+        normal_span = (
+            abs(math.sin(cut_angle)) * rect_length
+            + abs(math.cos(cut_angle)) * rect_width
+        )
+
+        if slit_width >= normal_span:
+            errors.append(
+                "[幾何錯誤] 矩形 Qubit 的 slit_width "
+                f"({slit_width}) 不得大於或等於切割方向尺寸 "
+                f"({normal_span:.3f})。"
+            )
+
     return errors, warnings
 
 # ==========================================
@@ -200,18 +235,22 @@ def check_overlap_conflicts(params, manager):
         c_gap = params.get("coupler", {}).get("gap_size", 0)
 
     # 3. 檢查邏輯：金屬間距是否足以容納兩者的挖空區
-    total_gap_needed = q_gap + c_gap
+    minimum_ground_neck = 10.0
 
-    if q_c_dis <= total_gap_needed:
-        errors.append(f"[結構重疊] Qubit 與 Coupler 的金屬間距 (q_c_dis = {q_c_dis}) "
-                      f"小於或等於兩者挖空區的總和 ({q_gap} + {c_gap} = {total_gap_needed})。\n"
-                      f"          這會導致接地層 (GND) 破孔消失，引發不可控的寄生耦合，請加大 q_c_dis。")
-    elif q_c_dis < total_gap_needed + 5.0:  
-        # 預留 5 μm 的安全接地鋪銅線寬，避免微影製程洗斷
-        warnings.append(f"[製程警告] Qubit 與 Coupler 之間的 GND 鋪銅寬度只剩下 "
-                        f"{q_c_dis - total_gap_needed:.1f} μm。\n"
-                        f"          可能會因過細導致金屬斷裂，或產生微波諧振槽效應 (Slot Mode)。建議適度增加 q_c_dis。")
+    required_distance = (
+        q_gap
+        + c_gap
+        + minimum_ground_neck
+    )
 
+    if q_c_dis < required_distance:
+        errors.append(
+            "[結構重疊] Qubit 與 Coupler 間距不足："
+            f"q_c_dis={q_c_dis} µm，"
+            f"至少需要 {required_distance} µm "
+            f"(Qubit gap {q_gap} + Coupler gap {c_gap} "
+            f"+ GND neck {minimum_ground_neck})。"
+        )
     return errors, warnings
 
 # ==========================================
@@ -297,12 +336,49 @@ def check_coupler_geometry(params, manager):
     # ==========================================
     elif c_type == "h_shape":
         h_cfg = params.get("h_coupler", {})
-        arm_w = h_cfg.get("arm_width", 0)
-        head1_l = h_cfg.get("head1_length", 0)
-        head2_l = h_cfg.get("head2_length", 0)
-        
-        if arm_w >= head1_l or arm_w >= head2_l:
-            errors.append(f"[結構畸形] H型耦合器的橋樑寬度 (arm_width = {arm_w}) 大於或等於兩側頭部長度 (H1={head1_l}, H2={head2_l})。")
+
+        arm_width = float(
+            h_cfg.get("arm_width", 0)
+        )
+        head1_length = float(
+            h_cfg.get("head1_length", 0)
+        )
+        head2_length = float(
+            h_cfg.get("head2_length", 0)
+        )
+        head1_width = float(
+            h_cfg.get("head1_width", 0)
+        )
+        head2_width = float(
+            h_cfg.get("head2_width", 0)
+        )
+        round_radius = float(
+            h_cfg.get("round_radius", 0)
+        )
+
+        minimum_head_margin = 10.0
+
+        if (
+            arm_width + minimum_head_margin
+            > min(head1_length, head2_length)
+        ):
+            errors.append(
+                "[結構畸形] H Coupler 的 head 長度必須至少比 "
+                f"arm_width 多 {minimum_head_margin} µm。"
+            )
+
+        narrowest_width = min(
+            arm_width,
+            head1_width,
+            head2_width,
+        )
+
+        if 2.0 * round_radius > narrowest_width:
+            errors.append(
+                "[圓角錯誤] H Coupler 的 round_radius 過大："
+                f"2R={2.0 * round_radius} µm，"
+                f"但最窄金屬只有 {narrowest_width} µm。"
+            )
 
     return errors, warnings
 

@@ -175,7 +175,7 @@ def _flatten_numeric_sections(data: Dict[str, Any]) -> Dict[str, Any]:
         "substrate",
         "Qubit_pra",
         "simulation",
-        "lom_settings",
+        "lom_settings"
     ]
 
     def flatten(value: Any, prefix: str) -> None:
@@ -196,13 +196,10 @@ def _sqlite_type(column_name: str, value: Any) -> str:
     if column_name.startswith("C_"):
         return "REAL"
     if column_name in {
-        "drc_pass",
-        "q3d_success",
-        "lom_success",
         "spec_pass",
         "q3d_matrix_complete",
         "q3d_matrix_element_count",
-        "q3d_node_count",
+        "q3d_node_count"
     }:
         return "INTEGER"
     if isinstance(value, bool):
@@ -401,15 +398,9 @@ def archive_sample_folder(trace_record: Dict[str, Any]) -> bool:
             f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 sample_id TEXT PRIMARY KEY,
-                parameter_hash TEXT,
                 run_name TEXT,
                 timestamp TEXT,
-                drc_pass INTEGER,
-                q3d_success INTEGER,
-                lom_success INTEGER,
-                spec_pass INTEGER,
-                failure_stage TEXT,
-                failure_reason TEXT
+                spec_pass INTEGER
             )
             """
         )
@@ -470,8 +461,6 @@ if __name__ == "__main__":
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "run_name": "Auto_Pipeline_Run",
         "spec_pass": 0,
-        "failure_stage": None,
-        "failure_reason": None,
     }
 
     try:

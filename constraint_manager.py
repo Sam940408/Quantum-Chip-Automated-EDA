@@ -8,38 +8,69 @@ def generate_constraints_json(filename='constraints.json'):
     """
     constraints_data = {
         "qubit": {
-            "gap_size": {"min": 30.0, "max": 50.0},
-            "radius": {"min": 50.0, "max": 500.0},     
-            "slit_width": {"min": 50.0, "max": 70.0},  
-            "rect_length": {"min": 50.0, "max": 1000.0}, 
-            "rect_width": {"min": 50.0, "max": 1000.0},  
-            "q_c_dis": {"min": 70.0, "max": 120.0},
+            "gap_size": {
+                "min": 30.0,
+                "max": 80.0,
+            },
+            "slit_width": {
+                "min": 20.0,
+                "max": 150.0,
+            },
+            "rect_length": {
+                "min": 140.0,
+                "max": 550.0,
+            },
+            "rect_width": {
+                "min": 300.0,
+                "max": 1000.0,
+            },
+            "q_c_dis": {
+                "min": 70.0,
+                "max": 200.0,
+            },
+            "round_radius": {
+                "min": 10.0,
+                "max": 30.0,
+            },
         },
-        "coupler": {
-            "arc_width": {"min": 10.0, "max": 100.0},
-            "gap_size": {"min": 30.0, "max": 50.0},
-            "center_dis": {"min": 5.0, "max": 15.0},     
-            "length": {"min": 50.0, "max": 1000.0},
-            "round_radius": {"min": 0, "max": 20.0}
-        },
-        "t_coupler": {
-            "arm_length": {"min": 50.0, "max": 500.0},
-            "arm_width": {"min": 5.0, "max": 100.0},
-            "head_width": {"min": 10.0, "max": 200.0},
-            "gap_size": {"min": 30.0, "max": 50.0},
-            "center_dis": {"min": 5.0, "max": 15.0},
-            "round_radius": {"min": 0, "max": 20.0}
-        },
+
         "h_coupler": {
-            "arm_length": {"min": 50.0, "max": 500.0},
-            "arm_width": {"min": 5.0, "max": 100.0},        
-            "head1_length": {"min": 10.0, "max": 200.0},    
-            "head1_width": {"min": 10.0, "max": 200.0},
-            "head2_length": {"min": 10.0, "max": 200.0},    
-            "head2_width": {"min": 10.0, "max": 200.0},
-            "gap_size": {"min": 30.0, "max": 50.0},
-            "center_dis": {"min": 25.0, "max": 35.0},
-            #"round_radius": {"min": 10, "max": 10.0}
+            "arm_width": {
+                "min": 20.0,
+                "max": 50.0,
+            },
+            "arm_length": {
+                "min": 50.0,
+                "max": 500.0,
+            },
+            "head1_width": {
+                "min": 20.0,
+                "max": 100.0,
+            },
+            "head2_width": {
+                "min": 20.0,
+                "max": 100.0,
+            },
+            "head1_length": {
+                "min": 80.0,
+                "max": 250.0,
+            },
+            "head2_length": {
+                "min": 80.0,
+                "max": 250.0,
+            },
+            "gap_size": {
+                "min": 30.0,
+                "max": 80.0,
+            },
+            "center_dis": {
+                "min": 20.0,
+                "max": 60.0,
+            },
+            "round_radius": {
+                "min": 2.0,
+                "max": 10.0,
+            },
         },
         "lom_settings": {
             "frequencies": {

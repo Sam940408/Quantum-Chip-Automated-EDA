@@ -1,0 +1,109 @@
+{
+    "layer_name": "QuantumChip_FloatingQCQ",
+    "toggles": {
+        "enable_gnd": true,
+        "enable_qubit": true,
+        "enable_coupler": true,
+        "coupler_type": "h_shape",
+        "enable_feedline": false,
+        "qubit_type": "rect"
+    },
+    "global": {
+        "gnd_length": 5000,
+        "gnd_width": 5000
+    },
+    "qubit": {
+        "radius": 200,
+        "points": 180,
+        "rect_length": 176.347,
+        "rect_width": 505.338,
+        "round_radius": 10,
+        "gap_size": 35.801,
+        "slit_width": 21.921,
+        "cut_angle": 90,
+        "q_c_dis": 131.634,
+        "ec1_ghz": 0.25,
+        "ec2_ghz": 0.23
+    },
+    "coupler": {
+        "center_dis": 40.0,
+        "arm_length": 250.0,
+        "arm_width": 20.0,
+        "head1_length": 150.0,
+        "head1_width": 60.0,
+        "head2_length": 150.0,
+        "head2_width": 60.0,
+        "gap_size": 50.0,
+        "round_radius": 10.0
+    },
+    "t_coupler": {
+        "center_dis": 5.0,
+        "arm_length": 150,
+        "arm_width": 20,
+        "head_length": 300,
+        "head_width": 50,
+        "gap_size": 30.0,
+        "round_radius": 10
+    },
+    "h_coupler": {
+        "center_dis": 35.952,
+        "arm_length": 266.501,
+        "arm_width": 38.514,
+        "head1_length": 218.193,
+        "head1_width": 70.826,
+        "head2_length": 113.893,
+        "head2_width": 56.274,
+        "gap_size": 69.817,
+        "round_radius": 10
+    },
+    "resonator": {},
+    "feedline": {},
+    "layer_mapping": {
+        "GND": 6,
+        "qubit1_left": 0,
+        "qubit1_right": 1,
+        "qubit2_left": 4,
+        "qubit2_right": 5,
+        "coupler1_left": 2,
+        "coupler1_right": 3
+    },
+    "project_settings": {
+        "project_name": "Floating_Qubit_Project",
+        "design_name": "Q3D_Extraction",
+        "setup_name": "Setup_5GHz",
+        "aedt_version": "2021.2"
+    },
+    "simulation": {
+        "adaptive_freq_ghz": 5.0
+    },
+    "Qubit_pra": {
+        "thin_cond_thickness_nm": 200.0,
+        "material_Q": "aluminum"
+    },
+    "substrate": {
+        "name": "Silicon_Substrate",
+        "material_S": "silicon",
+        "thickness": 500
+    },
+    "lom_settings": {
+        "constants": {
+            "h_bar": 1.05457180013e-34,
+            "phi0": 2.06783375846e-15,
+            "e": 1.602176620898e-19,
+            "Z0": 50
+        },
+        "frequencies": {
+            "w1": 6.6,
+            "w2": 6.7,
+            "wc": 4.0
+        },
+        "isSymmetric": 1,
+        "sweep_settings": {
+            "wc_lower_start": 4,
+            "wc_lower_stop": 5.6,
+            "wc_upper_start": 5.7,
+            "wc_upper_stop": 8,
+            "num_points": 10000
+        }
+    }
+}

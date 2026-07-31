@@ -189,7 +189,7 @@ def run_q3d_extraction(json_file):
 
     app.modeler.fit_all()
     # 執行完畢不強制關閉 AEDT，方便你查看網格與結果
-    app.release_desktop(close_projects=False, close_desktop=False)
+    app.release_desktop(close_projects= True, close_desktop=False)
     return 0
 
 if __name__ == "__main__":

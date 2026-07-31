@@ -1,0 +1,12 @@
+{
+    "enabled": true,
+    "batch_size": 100,
+    "db_config": "db_config.json",
+    "snapshot_path": "database_backup/quantum_simulation.db",
+    "state_file": "git_sync_state.json",
+    "work_directory": "git_sync_work",
+    "git_repository": ".",
+    "git_remote": "origin",
+    "git_branch": "main",
+    "commit_message": "Update: 更新模擬資料庫快照"
+}

@@ -12,7 +12,6 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             "enable_coupler": True,   # 是否生成耦合器 (Coupler)
            "coupler_type": "h_shape",# 選配 Coupler 形狀: "arc" (圓弧), "t_shape" (T型) 或 "h_shape" (H型)
             "enable_feedline": False,   # 是否生成饋線 (Feedline)
-
             "qubit_type": "rect"   # 選配 Qubit 形狀: "circle" (圓形) 或 "rect" (長方形)
         },
         
@@ -30,15 +29,15 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
             
             # 長方形專用參數
             "rect_length": 300,        # 長方形的 X 方向長度 (通常在浮動雙位元中代表單邊寬度)
-            "rect_width": 300,         # 長方形的 Y 方向寬度
+            "rect_width": 500,         # 長方形的 Y 方向寬度
             "round_radius": 10,
 
             # 圓形/長方形共用參數
-            "gap_size": 30.0,
-            "slit_width": 10.0,          # 兩個半邊之間的縫隙寬度
+            "gap_size": 50.0,
+            "slit_width": 100.0,          # 兩個半邊之間的縫隙寬度
             "cut_angle": 90,           # 0: 水平切割, 90: 垂直切割, 可輸入任意角度
-            "q_c_dis": 70,
-            "q_re_dis": 30,            # 沒用
+            "q_c_dis": 120,
+            #"q_re_dis": 30,            # 沒用
 
             # --- 預留給電容矩陣萃取結果的欄位 (單位: GHz) ---
             "ec1_ghz": 0.25,  # 預設給個合理值測試用 (對應 250 MHz)
@@ -47,15 +46,17 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
 
         # 耦合器參數 (弧形 + T-bar)
         "coupler": {
-            "center_dis": 5.0,#距離中心距離
-            "length": 150,
-            "half_width": 40,#這只有一半
-            "gap_size": 30.0,
-            "arc_width": 50,
-            "arc_start_angle": 110,
-            "arc_stop_angle": 250,
-            "safe_ext": 100,        #基本不動
-            "round_radius": 10
+            "center_dis": 40.0,
+            "arm_length": 250.0,
+            "arm_width": 20.0,
+
+            "head1_length": 150.0,
+            "head1_width": 60.0,
+            "head2_length": 150.0,
+            "head2_width": 60.0,
+
+            "gap_size": 50.0,
+            "round_radius": 10.0,
         },
 
         # T型耦合器參數 (T-bar)
@@ -129,8 +130,8 @@ def generate_layout_json(filename='layout_parameters.json', print_content=False)
                 "Z0": 50
             },
             "frequencies": {
-                "w1": 5.6,
-                "w2": 5.7,
+                "w1": 6.6,
+                "w2": 6.7,
                 "wc": 4.0
             },
             "isSymmetric": 1,
