@@ -4,36 +4,39 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+
+# Python 虛擬環境
 env/
 venv/
 .venv/
 
-# 模擬器與佈局產生的暫存檔與龐大檔案
+# 模擬器與版圖產生檔
 runs/
 *.gds
+*.dxf
 *.aedt
 *.aedtresults/
 *.lock
-capacitance_matrix_results.json
-lom_results.json
-spec_results.json
 
-# 資料庫 (如果您不希望把幾萬筆的 DB 傳上去，可以取消註解下面這行)
-# *.db
+/capacitance_matrix_results.json
+/lom_results.json
+/spec_results.json
+/layout_parameters.json
 
+# 正在寫入的正式資料庫：只忽略根目錄版本
+/quantum_simulation.db
+/quantum_simulation.db-wal
+/quantum_simulation.db-shm
 
-# 忽略虛擬環境
-.venv/
-__pycache__/
+# Git 自動同步狀態與暫存
+/git_sync_state.json
+/git_sync_work/
 
-# 忽略下載的論文 (假設您放在名為 papers 的資料夾，或是所有 PDF 檔)
+# 明確允許安全快照進入 Git
+!database_backup/
+!database_backup/quantum_simulation.db
+
+# 論文與不公開資料
 *.pdf
 drc_paper/
-
-
-# 忽略其他特定不能公開的腳本或檔案 (請依您的實際檔名修改)
 floating_qubit_and_floating_coupler_analysis/
-
-# 保留基礎配置範本，但不追蹤後續修改
-!layout_parameters.json
-!constraints.json
